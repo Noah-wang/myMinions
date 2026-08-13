@@ -1,0 +1,15 @@
+{
+  "global": {
+    "name": "Noah",
+    "language": "zh",
+    "preferences": []
+  },
+  "agents": {
+    "coros-report": {
+      "goals": [],
+      "preferences": [],
+      "injury_notes": [],
+      "latest_reported_activity_id": null
+    }
+  }
+}

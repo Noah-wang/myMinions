@@ -4,6 +4,7 @@ import discord
 from discord import app_commands
 
 from agent import generate_coros_report, list_available_coros_tools
+from knowledge import answer_running_question
 
 
 def _required_env(name: str) -> str:
@@ -36,6 +37,15 @@ async def _generate_and_send_report(
         await _send_chunks(channel, report)
     except Exception as exc:
         await channel.send(f"生成 COROS 报告失败：{exc}")
+
+
+async def _answer_running_question(channel: discord.abc.Messageable, question: str) -> None:
+    await channel.send("正在检索跑步书籍并生成回答...")
+    try:
+        answer = await answer_running_question(question)
+        await _send_chunks(channel, answer)
+    except Exception as exc:
+        await channel.send(f"回答跑步问题失败：{exc}")
 
 
 def create_discord_client() -> discord.Client:
@@ -90,6 +100,21 @@ def create_discord_client() -> discord.Client:
             if interaction.channel is not None:
                 await interaction.channel.send(f"读取 COROS 工具失败：{exc}")
 
+    @tree.command(name="running-ask", description="基于已导入跑步书籍回答训练问题")
+    @app_commands.describe(question="你的跑步训练问题")
+    async def running_ask_command(interaction: discord.Interaction, question: str) -> None:
+        if interaction.channel_id is None or not _is_allowed_channel(
+            interaction.channel_id
+        ):
+            await interaction.response.send_message(
+                "这个命令只能在指定频道使用。", ephemeral=True
+            )
+            return
+
+        await interaction.response.send_message("收到，开始检索跑步书籍。")
+        if interaction.channel is not None:
+            await _answer_running_question(interaction.channel, question)
+
     @client.event
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
@@ -114,6 +139,14 @@ def create_discord_client() -> discord.Client:
                 request = "分析我最近一次运动，重点看配速、心率、恢复和下一次训练建议。"
 
             await _generate_and_send_report(message.channel, request)
+
+        if content.startswith("!running"):
+            question = content.removeprefix("!running").strip()
+            if not question:
+                await message.channel.send("请在 `!running` 后面写你的跑步训练问题。")
+                return
+
+            await _answer_running_question(message.channel, question)
 
     return client
 

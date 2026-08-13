@@ -3,6 +3,7 @@ from typing import Any
 
 from src.integrations.coros_mcp import call_coros_tool, compact_json, list_coros_tools
 from src.runtime.llm import complete_json, complete_text
+from src.runtime.memory import format_memory_for_prompt
 from prompt import REPORT_SYSTEM_PROMPT, TOOL_PLANNER_PROMPT
 
 
@@ -51,6 +52,7 @@ Available COROS MCP tools:
 
 
 async def generate_coros_report(user_request: str) -> str:
+	memory = format_memory_for_prompt("coros-report")
 	tools = await list_coros_tools()
 	tool_calls = await _plan_tool_calls(user_request, tools)
 
@@ -73,6 +75,9 @@ async def generate_coros_report(user_request: str) -> str:
 		f"""
 User request:
 {user_request}
+
+User memory:
+{memory}
 
 COROS tool calls and results:
 {json.dumps(results, ensure_ascii=False, indent=2)}
