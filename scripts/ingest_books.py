@@ -1,4 +1,3 @@
-from src.runtime.rag import KNOWLEDGE_DIR
 import json
 import re
 from pathlib import Path
