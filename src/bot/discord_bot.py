@@ -9,6 +9,7 @@ from auto_report import (
     check_and_send_coros_auto_report,
     register_coros_auto_report,
 )
+from feelings import list_recent_feelings, record_feeling
 
 
 # 拿本地变量
@@ -135,6 +136,34 @@ def create_discord_client() -> discord.Client:
         if interaction.channel is not None:
             await _answer_running_question(interaction.channel, question)
 
+    @tree.command(name="feel", description="记录一次运动后的主观感受")
+    @app_commands.describe(note="例如：今天腿很沉，RPE 7，左膝有点紧")
+    async def feel_command(interaction: discord.Interaction, note: str) -> None:
+        if interaction.channel_id is None or not _is_allowed_channel(
+            interaction.channel_id
+        ):
+            await interaction.response.send_message(
+                "这个命令只能在指定频道使用。", ephemeral=True
+            )
+            return
+
+        await interaction.response.send_message("正在记录你的运动感受。")
+        result = await record_feeling(note)
+        if interaction.channel is not None:
+            await interaction.channel.send(result)
+
+    @tree.command(name="feelings", description="查看最近记录的运动感受")
+    async def feelings_command(interaction: discord.Interaction) -> None:
+        if interaction.channel_id is None or not _is_allowed_channel(
+            interaction.channel_id
+        ):
+            await interaction.response.send_message(
+                "这个命令只能在指定频道使用。", ephemeral=True
+            )
+            return
+
+        await interaction.response.send_message(list_recent_feelings())
+
     # 监听消息
     @client.event
     async def on_message(message: discord.Message) -> None:
@@ -152,6 +181,18 @@ def create_discord_client() -> discord.Client:
                 await _send_chunks(message.channel, tools)
             except Exception as exc:
                 await message.channel.send(f"读取 COROS 工具失败：{exc}")
+            return
+
+        if content.startswith("!feel") or content.startswith("!feeling"):
+            if content in {"!feelings", "!feeling-list"}:
+                await message.channel.send(list_recent_feelings())
+                return
+            if content.startswith("!feeling"):
+                note = content.removeprefix("!feeling").strip()
+            else:
+                note = content.removeprefix("!feel").strip()
+            result = await record_feeling(note)
+            await message.channel.send(result)
             return
 
         if content == "!coros-auto-check":

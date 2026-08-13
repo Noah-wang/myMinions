@@ -88,7 +88,7 @@ def _timestamp(activity: dict[str, Any]) -> int:
     return 0
 
 
-def _activity_key(activity: dict[str, Any]) -> str:
+def activity_key(activity: dict[str, Any]) -> str:
     parts = [
         str(activity.get("labelId", "")),
         str(activity.get("sportType", "")),
@@ -111,7 +111,7 @@ async def latest_coros_activity() -> dict[str, Any] | None:
 
 def should_send_activity(activity: dict[str, Any]) -> bool:
     latest_reported_id = get_agent_memory(AGENT_NAME).get("latest_reported_activity_id")
-    return latest_reported_id != _activity_key(activity)
+    return latest_reported_id != activity_key(activity)
 
 
 def has_reported_activity() -> bool:
@@ -122,7 +122,7 @@ def mark_activity_reported(activity: dict[str, Any]) -> None:
     update_agent_memory(
         AGENT_NAME,
         {
-            "latest_reported_activity_id": _activity_key(activity),
+            "latest_reported_activity_id": activity_key(activity),
             "latest_reported_activity": {
                 "labelId": activity.get("labelId"),
                 "sportType": activity.get("sportType"),

@@ -9,7 +9,8 @@
       "goals": [],
       "preferences": [],
       "injury_notes": [],
-      "latest_reported_activity_id": null
+      "latest_reported_activity_id": null,
+      "feeling_notes": []
     }
   }
 }
