@@ -7,6 +7,7 @@ from agent import generate_coros_report, list_available_coros_tools
 from knowledge import answer_running_question
 
 
+# 拿本地变量
 def _required_env(name: str) -> str:
     value = os.getenv(name)
     if not value:
@@ -14,20 +15,24 @@ def _required_env(name: str) -> str:
     return value
 
 
+# 发送消息
 async def _send_chunks(channel: discord.abc.Messageable, text: str) -> None:
     chunk_size = 1800
     for start in range(0, len(text), chunk_size):
         await channel.send(text[start : start + chunk_size])
 
 
+# 拿设定的频道id
 def _configured_channel_id() -> str | None:
     return os.getenv("DISCORD_RUNNING_CHANNEL_ID")
 
 
+# 校验当前频道id是否为设定的频道id
 def _is_allowed_channel(channel_id: int) -> bool:
     return str(channel_id) == _configured_channel_id()
 
 
+# 生成并发送coros报告
 async def _generate_and_send_report(
     channel: discord.abc.Messageable, request: str
 ) -> None:
@@ -39,7 +44,10 @@ async def _generate_and_send_report(
         await channel.send(f"生成 COROS 报告失败：{exc}")
 
 
-async def _answer_running_question(channel: discord.abc.Messageable, question: str) -> None:
+# 回答跑步问题
+async def _answer_running_question(
+    channel: discord.abc.Messageable, question: str
+) -> None:
     await channel.send("正在检索跑步书籍并生成回答...")
     try:
         answer = await answer_running_question(question)
@@ -48,17 +56,20 @@ async def _answer_running_question(channel: discord.abc.Messageable, question: s
         await channel.send(f"回答跑步问题失败：{exc}")
 
 
+# 创建discord客户端
 def create_discord_client() -> discord.Client:
     intents = discord.Intents.default()
     intents.message_content = True
     client = discord.Client(intents=intents)
     tree = app_commands.CommandTree(client)
 
+    # 机器人上线
     @client.event
     async def on_ready() -> None:
         await tree.sync()
         print(f"Logged in as {client.user}")
 
+    # coros命令
     @tree.command(name="coros", description="生成 COROS 运动报告")
     @app_commands.describe(
         request="你想分析什么，例如：最近一次跑步、明天是否适合高强度"
@@ -81,6 +92,7 @@ def create_discord_client() -> discord.Client:
         if interaction.channel is not None:
             await _generate_and_send_report(interaction.channel, request)
 
+    # coros工具命令
     @tree.command(name="coros-tools", description="列出 COROS MCP 当前提供的工具")
     async def coros_tools_command(interaction: discord.Interaction) -> None:
         if interaction.channel_id is None or not _is_allowed_channel(
@@ -100,9 +112,12 @@ def create_discord_client() -> discord.Client:
             if interaction.channel is not None:
                 await interaction.channel.send(f"读取 COROS 工具失败：{exc}")
 
+    # 跑步书籍回答命令
     @tree.command(name="running-ask", description="基于已导入跑步书籍回答训练问题")
     @app_commands.describe(question="你的跑步训练问题")
-    async def running_ask_command(interaction: discord.Interaction, question: str) -> None:
+    async def running_ask_command(
+        interaction: discord.Interaction, question: str
+    ) -> None:
         if interaction.channel_id is None or not _is_allowed_channel(
             interaction.channel_id
         ):
@@ -115,6 +130,7 @@ def create_discord_client() -> discord.Client:
         if interaction.channel is not None:
             await _answer_running_question(interaction.channel, question)
 
+    # 监听消息
     @client.event
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
