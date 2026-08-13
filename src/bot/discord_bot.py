@@ -5,6 +5,10 @@ from discord import app_commands
 
 from agent import generate_coros_report, list_available_coros_tools
 from knowledge import answer_running_question
+from auto_report import (
+    check_and_send_coros_auto_report,
+    register_coros_auto_report,
+)
 
 
 # 拿本地变量
@@ -67,6 +71,7 @@ def create_discord_client() -> discord.Client:
     @client.event
     async def on_ready() -> None:
         await tree.sync()
+        register_coros_auto_report(client)
         print(f"Logged in as {client.user}")
 
     # coros命令
@@ -147,6 +152,32 @@ def create_discord_client() -> discord.Client:
                 await _send_chunks(message.channel, tools)
             except Exception as exc:
                 await message.channel.send(f"读取 COROS 工具失败：{exc}")
+            return
+
+        if content == "!coros-auto-check":
+            await message.channel.send("正在检查是否有新的 COROS 运动...")
+            result = await check_and_send_coros_auto_report(
+                client,
+                notify_no_change=True,
+                send_on_first_run=True,
+            )
+            if (
+                result.startswith("COROS auto report")
+                and "no new activity" not in result
+                and not result.endswith("sent.")
+            ):
+                await message.channel.send(result)
+            return
+
+        if content == "!coros-auto-report":
+            await message.channel.send("正在对最新一条 COROS 运动生成自动报告...")
+            result = await check_and_send_coros_auto_report(
+                client,
+                send_on_first_run=True,
+                force_send=True,
+            )
+            if result.startswith("COROS auto report") and not result.endswith("sent."):
+                await message.channel.send(result)
             return
 
         if content.startswith("!coros"):

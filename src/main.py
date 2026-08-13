@@ -8,12 +8,10 @@ sys.path.insert(0, str(ROOT_DIR))
 sys.path.insert(0, str(ROOT_DIR / "coros-report" / "agent"))
 
 from src.bot.discord_bot import run_discord_bot
-from src.runtime.scheduler import start_scheduler
 
 
 def main() -> None:
 	load_dotenv(ROOT_DIR / ".env")
-	start_scheduler()
 	run_discord_bot()
 
 

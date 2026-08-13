@@ -16,7 +16,7 @@ Rules:
 
 
 async def answer_running_question(question: str) -> str:
-    chunks = search_knowledge(question, limit=5)
+    chunks = await search_knowledge(question, limit=5)
     if not chunks:
         return "我没有在已导入的跑步书籍里检索到相关内容。可以换个问法，或先导入更多资料。"
 
