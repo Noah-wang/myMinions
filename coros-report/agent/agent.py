@@ -1,8 +1,8 @@
 import json
 from typing import Any
 
-from coros_mcp import call_coros_tool, compact_json, list_coros_tools
-from llm import complete_json, complete_text
+from src.integrations.coros_mcp import call_coros_tool, compact_json, list_coros_tools
+from src.runtime.llm import complete_json, complete_text
 from prompt import REPORT_SYSTEM_PROMPT, TOOL_PLANNER_PROMPT
 
 
