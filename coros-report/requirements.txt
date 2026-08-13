@@ -1,0 +1,6 @@
+apscheduler
+discord.py
+mcp
+openai
+python-dotenv
+
