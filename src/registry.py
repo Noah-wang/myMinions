@@ -1,6 +1,7 @@
 from src.runtime.capability import Capability, CommandContext, TextCommand
 
 from coros_capability import build_coros_capability
+from kitchen_capability import build_kitchen_capability
 
 
 class CapabilityRegistry:
@@ -51,5 +52,10 @@ _registry: CapabilityRegistry | None = None
 def get_registry() -> CapabilityRegistry:
     global _registry
     if _registry is None:
-        _registry = CapabilityRegistry([build_coros_capability()])
+        _registry = CapabilityRegistry(
+            [
+                build_coros_capability(),
+                build_kitchen_capability(),
+            ]
+        )
     return _registry

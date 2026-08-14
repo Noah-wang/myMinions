@@ -23,13 +23,28 @@ async def _send_chunks(channel: discord.abc.Messageable, text: str) -> None:
 
 
 # 拿设定的频道id
-def _configured_channel_id() -> str | None:
-    return os.getenv("DISCORD_RUNNING_CHANNEL_ID")
+def _configured_channel_id(env_name: str) -> str | None:
+    return os.getenv(env_name)
 
 
 # 校验当前频道id是否为设定的频道id
-def _is_allowed_channel(channel_id: int) -> bool:
-    return str(channel_id) == _configured_channel_id()
+def _is_allowed_channel(
+    channel_id: int,
+    env_name: str = "DISCORD_RUNNING_CHANNEL_ID",
+) -> bool:
+    return str(channel_id) == _configured_channel_id(env_name)
+
+
+def _is_capabilities_channel(channel_id: int) -> bool:
+    return _is_allowed_channel(channel_id, "DISCORD_RUNNING_CHANNEL_ID") or (
+        _is_allowed_channel(channel_id, "DISCORD_COOKING_CHANNEL_ID")
+    )
+
+
+def _channel_env_for_text_command(command_name: str) -> str:
+    if command_name == "kitchen":
+        return "DISCORD_COOKING_CHANNEL_ID"
+    return "DISCORD_RUNNING_CHANNEL_ID"
 
 
 def _command_context(
@@ -41,6 +56,32 @@ def _command_context(
         send=channel.send,
         send_chunks=lambda text: _send_chunks(channel, text),
     )
+
+
+async def _dispatch_interaction_command(
+    interaction: discord.Interaction,
+    client: discord.Client,
+    command_name: str,
+    argument: str,
+    start_message: str,
+    channel_env_name: str = "DISCORD_RUNNING_CHANNEL_ID",
+) -> None:
+    if interaction.channel_id is None or not _is_allowed_channel(
+        interaction.channel_id,
+        channel_env_name,
+    ):
+        await interaction.response.send_message(
+            "这个命令只能在指定频道使用。", ephemeral=True
+        )
+        return
+
+    await interaction.response.send_message(start_message)
+    if interaction.channel is not None:
+        await get_registry().dispatch_command(
+            _command_context(client, interaction.channel),
+            command_name,
+            argument,
+        )
 
 
 # 创建discord客户端
@@ -162,7 +203,7 @@ def create_discord_client() -> discord.Client:
 
     @tree.command(name="capabilities", description="查看当前已加载的能力")
     async def capabilities_command(interaction: discord.Interaction) -> None:
-        if interaction.channel_id is None or not _is_allowed_channel(
+        if interaction.channel_id is None or not _is_capabilities_channel(
             interaction.channel_id
         ):
             await interaction.response.send_message(
@@ -172,19 +213,107 @@ def create_discord_client() -> discord.Client:
 
         await interaction.response.send_message(get_registry().describe())
 
+    @tree.command(name="kitchen-add", description="从 B站视频提取菜谱并加入采购清单")
+    @app_commands.describe(video="B站 BV号或视频链接")
+    async def kitchen_add_command(
+        interaction: discord.Interaction, video: str
+    ) -> None:
+        await _dispatch_interaction_command(
+            interaction,
+            client,
+            "kitchen",
+            f"add {video}",
+            "收到，开始抓取 B站字幕并提取菜谱。",
+            "DISCORD_COOKING_CHANNEL_ID",
+        )
+
+    @tree.command(name="kitchen-shopping", description="查看厨房采购清单")
+    async def kitchen_shopping_command(interaction: discord.Interaction) -> None:
+        await _dispatch_interaction_command(
+            interaction,
+            client,
+            "kitchen",
+            "shopping",
+            "正在读取采购清单。",
+            "DISCORD_COOKING_CHANNEL_ID",
+        )
+
+    @tree.command(name="kitchen-bought", description="记录已采购食材")
+    @app_commands.describe(
+        name="食材名，例如：鸡腿",
+        amount="数量或重量，例如：1000g",
+        storage="保存方式，例如：冷藏、冷冻、常温",
+        shelf_life="保质期，例如：3天，或 2026-08-20",
+    )
+    async def kitchen_bought_command(
+        interaction: discord.Interaction,
+        name: str,
+        amount: str,
+        storage: str = "",
+        shelf_life: str = "",
+    ) -> None:
+        await _dispatch_interaction_command(
+            interaction,
+            client,
+            "kitchen",
+            f"bought {name} {amount} {storage} {shelf_life}".strip(),
+            "正在记录采购入库。",
+            "DISCORD_COOKING_CHANNEL_ID",
+        )
+
+    @tree.command(name="kitchen-pantry", description="查看当前厨房库存")
+    async def kitchen_pantry_command(interaction: discord.Interaction) -> None:
+        await _dispatch_interaction_command(
+            interaction,
+            client,
+            "kitchen",
+            "pantry",
+            "正在读取厨房库存。",
+            "DISCORD_COOKING_CHANNEL_ID",
+        )
+
+    @tree.command(name="kitchen-today", description="根据库存推荐今天可以做什么")
+    async def kitchen_today_command(interaction: discord.Interaction) -> None:
+        await _dispatch_interaction_command(
+            interaction,
+            client,
+            "kitchen",
+            "today",
+            "正在根据库存匹配菜谱。",
+            "DISCORD_COOKING_CHANNEL_ID",
+        )
+
+    @tree.command(name="kitchen-expiring", description="查看快过期食材")
+    async def kitchen_expiring_command(interaction: discord.Interaction) -> None:
+        await _dispatch_interaction_command(
+            interaction,
+            client,
+            "kitchen",
+            "expiring",
+            "正在检查快过期食材。",
+            "DISCORD_COOKING_CHANNEL_ID",
+        )
+
     # 监听消息
     @client.event
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
             return
 
-        if not _is_allowed_channel(message.channel.id):
-            return
-
         content = message.content.strip()
         if content == "!capabilities":
+            if not _is_capabilities_channel(message.channel.id):
+                return
             await message.channel.send(get_registry().describe())
             return
+
+        if content.startswith("!"):
+            command_name = content[1:].partition(" ")[0]
+            if not _is_allowed_channel(
+                message.channel.id,
+                _channel_env_for_text_command(command_name),
+            ):
+                return
 
         await get_registry().dispatch_text(
             _command_context(client, message.channel),
