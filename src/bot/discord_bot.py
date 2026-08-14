@@ -3,13 +3,8 @@ import os
 import discord
 from discord import app_commands
 
-from agent import generate_coros_report, list_available_coros_tools
-from knowledge import answer_running_question
-from auto_report import (
-    check_and_send_coros_auto_report,
-    register_coros_auto_report,
-)
-from feelings import list_recent_feelings, record_feeling
+from src.registry import get_registry
+from src.runtime.capability import CommandContext
 
 
 # 拿本地变量
@@ -37,28 +32,15 @@ def _is_allowed_channel(channel_id: int) -> bool:
     return str(channel_id) == _configured_channel_id()
 
 
-# 生成并发送coros报告
-async def _generate_and_send_report(
-    channel: discord.abc.Messageable, request: str
-) -> None:
-    await channel.send("正在读取 COROS 数据并生成报告...")
-    try:
-        report = await generate_coros_report(request)
-        await _send_chunks(channel, report)
-    except Exception as exc:
-        await channel.send(f"生成 COROS 报告失败：{exc}")
-
-
-# 回答跑步问题
-async def _answer_running_question(
-    channel: discord.abc.Messageable, question: str
-) -> None:
-    await channel.send("正在检索跑步书籍并生成回答...")
-    try:
-        answer = await answer_running_question(question)
-        await _send_chunks(channel, answer)
-    except Exception as exc:
-        await channel.send(f"回答跑步问题失败：{exc}")
+def _command_context(
+    client: discord.Client, channel: discord.abc.Messageable
+) -> CommandContext:
+    return CommandContext(
+        client=client,
+        channel=channel,
+        send=channel.send,
+        send_chunks=lambda text: _send_chunks(channel, text),
+    )
 
 
 # 创建discord客户端
@@ -72,7 +54,7 @@ def create_discord_client() -> discord.Client:
     @client.event
     async def on_ready() -> None:
         await tree.sync()
-        register_coros_auto_report(client)
+        get_registry().run_startup_handlers(client)
         print(f"Logged in as {client.user}")
 
     # coros命令
@@ -96,7 +78,11 @@ def create_discord_client() -> discord.Client:
 
         await interaction.response.send_message("收到，开始生成 COROS 运动报告。")
         if interaction.channel is not None:
-            await _generate_and_send_report(interaction.channel, request)
+            await get_registry().dispatch_command(
+                _command_context(client, interaction.channel),
+                "coros",
+                request,
+            )
 
     # coros工具命令
     @tree.command(name="coros-tools", description="列出 COROS MCP 当前提供的工具")
@@ -110,13 +96,11 @@ def create_discord_client() -> discord.Client:
             return
 
         await interaction.response.send_message("正在读取 COROS MCP 工具列表...")
-        try:
-            tools = await list_available_coros_tools()
-            if interaction.channel is not None:
-                await _send_chunks(interaction.channel, tools)
-        except Exception as exc:
-            if interaction.channel is not None:
-                await interaction.channel.send(f"读取 COROS 工具失败：{exc}")
+        if interaction.channel is not None:
+            await get_registry().dispatch_command(
+                _command_context(client, interaction.channel),
+                "coros-tools",
+            )
 
     # 跑步书籍回答命令
     @tree.command(name="running-ask", description="基于已导入跑步书籍回答训练问题")
@@ -134,7 +118,11 @@ def create_discord_client() -> discord.Client:
 
         await interaction.response.send_message("收到，开始检索跑步书籍。")
         if interaction.channel is not None:
-            await _answer_running_question(interaction.channel, question)
+            await get_registry().dispatch_command(
+                _command_context(client, interaction.channel),
+                "running",
+                question,
+            )
 
     @tree.command(name="feel", description="记录一次运动后的主观感受")
     @app_commands.describe(note="例如：今天腿很沉，RPE 7，左膝有点紧")
@@ -148,9 +136,12 @@ def create_discord_client() -> discord.Client:
             return
 
         await interaction.response.send_message("正在记录你的运动感受。")
-        result = await record_feeling(note)
         if interaction.channel is not None:
-            await interaction.channel.send(result)
+            await get_registry().dispatch_command(
+                _command_context(client, interaction.channel),
+                "feel",
+                note,
+            )
 
     @tree.command(name="feelings", description="查看最近记录的运动感受")
     async def feelings_command(interaction: discord.Interaction) -> None:
@@ -162,7 +153,24 @@ def create_discord_client() -> discord.Client:
             )
             return
 
-        await interaction.response.send_message(list_recent_feelings())
+        await interaction.response.send_message("正在读取最近记录的运动感受。")
+        if interaction.channel is not None:
+            await get_registry().dispatch_command(
+                _command_context(client, interaction.channel),
+                "feelings",
+            )
+
+    @tree.command(name="capabilities", description="查看当前已加载的能力")
+    async def capabilities_command(interaction: discord.Interaction) -> None:
+        if interaction.channel_id is None or not _is_allowed_channel(
+            interaction.channel_id
+        ):
+            await interaction.response.send_message(
+                "这个命令只能在指定频道使用。", ephemeral=True
+            )
+            return
+
+        await interaction.response.send_message(get_registry().describe())
 
     # 监听消息
     @client.event
@@ -174,67 +182,14 @@ def create_discord_client() -> discord.Client:
             return
 
         content = message.content.strip()
-        if content == "!coros-tools":
-            await message.channel.send("正在读取 COROS MCP 工具列表...")
-            try:
-                tools = await list_available_coros_tools()
-                await _send_chunks(message.channel, tools)
-            except Exception as exc:
-                await message.channel.send(f"读取 COROS 工具失败：{exc}")
+        if content == "!capabilities":
+            await message.channel.send(get_registry().describe())
             return
 
-        if content.startswith("!feel") or content.startswith("!feeling"):
-            if content in {"!feelings", "!feeling-list"}:
-                await message.channel.send(list_recent_feelings())
-                return
-            if content.startswith("!feeling"):
-                note = content.removeprefix("!feeling").strip()
-            else:
-                note = content.removeprefix("!feel").strip()
-            result = await record_feeling(note)
-            await message.channel.send(result)
-            return
-
-        if content == "!coros-auto-check":
-            await message.channel.send("正在检查是否有新的 COROS 运动...")
-            result = await check_and_send_coros_auto_report(
-                client,
-                notify_no_change=True,
-                send_on_first_run=True,
-            )
-            if (
-                result.startswith("COROS auto report")
-                and "no new activity" not in result
-                and not result.endswith("sent.")
-            ):
-                await message.channel.send(result)
-            return
-
-        if content == "!coros-auto-report":
-            await message.channel.send("正在对最新一条 COROS 运动生成自动报告...")
-            result = await check_and_send_coros_auto_report(
-                client,
-                send_on_first_run=True,
-                force_send=True,
-            )
-            if result.startswith("COROS auto report") and not result.endswith("sent."):
-                await message.channel.send(result)
-            return
-
-        if content.startswith("!coros"):
-            request = content.removeprefix("!coros").strip()
-            if not request:
-                request = "分析我最近一次运动，重点看配速、心率、恢复和下一次训练建议。"
-
-            await _generate_and_send_report(message.channel, request)
-
-        if content.startswith("!running"):
-            question = content.removeprefix("!running").strip()
-            if not question:
-                await message.channel.send("请在 `!running` 后面写你的跑步训练问题。")
-                return
-
-            await _answer_running_question(message.channel, question)
+        await get_registry().dispatch_text(
+            _command_context(client, message.channel),
+            content,
+        )
 
     return client
 

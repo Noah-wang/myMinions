@@ -17,9 +17,10 @@ myMinions/
 ├── src/
 │   ├── bot/              # Discord 交互层
 │   ├── runtime/          # 可复用运行时能力
-│   └── integrations/     # 外部服务接入
+│   ├── integrations/     # 外部服务接入
+│   └── registry.py       # capability 注册与命令路由
 ├── coros-report/
-│   ├── agent/            # coros-report 专属 Agent 逻辑和自动报告逻辑
+│   ├── agent/            # coros-report 专属 capability 逻辑
 │   └── docs/             # coros-report 文档
 ├── data/
 │   ├── memory.json       # 记忆
@@ -34,9 +35,12 @@ myMinions/
 后续又进一步明确了模块边界：
 
 ```text
+capability.py = 定义能力包、文本命令和执行上下文
+registry.py = 注册能力包并路由命令
+coros_capability.py = 把 coros-report 包装成第一个 capability
 auto_report.py = coros-report 专属业务逻辑，负责查新运动和生成报告
-scheduler.py = 通用触发器，负责什么时候执行和把结果发到哪里
-discord_bot.py = 交互入口，负责接收指令和启动定时器
+scheduler.py = 通用触发器，负责什么时候执行
+discord_bot.py = 交互入口，只负责接收消息并交给 registry
 ```
 
 ## 3. 已添加的核心功能
@@ -83,10 +87,16 @@ DEEPSEEK_MODEL=deepseek-chat
 /coros
 /coros-tools
 /running-ask
+/feel
+/feelings
+/capabilities
 
 !coros
 !coros-tools
 !running
+!feel
+!feelings
+!capabilities
 ```
 
 并且限制只能在指定频道使用：
@@ -226,6 +236,65 @@ COROS_AUTO_REPORT_SEND_ON_FIRST_RUN
 ```
 
 自动模式不需要用户发送命令，只要 bot 持续运行，就会按间隔自动检查。
+
+### 3.8 主框架 Capability / Registry / Router 重构
+
+为了让 `myMinions` 更接近 OpenClaw / Codex 这类“主运行时 + 能力扩展”的结构，项目加入了 capability 注册机制。
+
+核心变化是：
+
+```text
+之前：
+Discord bot
+-> 直接 import coros-report 的 agent / knowledge / feelings / auto_report
+-> 直接调用具体函数
+
+现在：
+Discord bot
+-> registry
+-> coros-report capability
+-> 对应 command handler
+```
+
+新增的通用框架文件：
+
+```text
+src/runtime/capability.py
+= 定义 Capability、TextCommand、CommandContext
+
+src/registry.py
+= 加载所有 capabilities，注册命令，分发文本消息
+```
+
+`coros-report` 被包装成第一个 capability：
+
+```text
+coros-report/agent/coros_capability.py
+= 注册 coros-report 的命令和启动任务
+```
+
+当前 `coros-report` capability 注册了这些文本命令：
+
+```text
+!coros
+!coros-tools
+!running
+!feel
+!feelings
+!coros-auto-check
+!coros-auto-report
+```
+
+同时新增：
+
+```text
+!capabilities
+/capabilities
+```
+
+用于查看当前加载的能力包。
+
+这次重构后，`coros-report` 不再是整个系统本身，而是 `myMinions` 主框架里的第一个能力包。未来新增 `museum-guide`、`calendar-agent`、`study-agent` 等能力时，可以按同样方式新增 capability，而不是继续把逻辑堆进 `discord_bot.py`。
 
 ## 4. 主要问题与解决方案
 
@@ -468,6 +537,39 @@ main.py
 
 这个命令可以强制对最新运动生成报告，不影响自动模式的去重逻辑。
 
+### 问题 13：Discord bot 开始堆积具体业务逻辑
+
+随着功能增加，`discord_bot.py` 开始直接 import 并调用多个 coros-report 业务函数：
+
+```text
+generate_coros_report
+answer_running_question
+record_feeling
+check_and_send_coros_auto_report
+```
+
+问题是：如果以后继续添加博物馆、日程、学习等 Agent，Discord bot 会变成一个越来越大的业务入口文件，不利于复用和扩展。
+
+解决方案：
+
+```text
+新增 src/runtime/capability.py 定义 capability 标准结构
+新增 src/registry.py 统一注册和路由 capabilities
+新增 coros-report/agent/coros_capability.py 包装 coros-report
+Discord bot 只调用 registry，不再直接依赖 coros-report 的具体实现
+```
+
+调整后架构变为：
+
+```text
+Discord bot
+-> registry
+-> capability
+-> agent-specific handlers
+```
+
+这让 `myMinions` 从单一业务 Agent 应用，升级成一个可以继续扩展多个能力包的小型 Agent 平台。
+
 ## 5. 当前项目能力总结
 
 当前 `coros-report` 已经具备：
@@ -485,9 +587,12 @@ main.py
 支持自动检测新运动并推送报告
 支持 scheduler 定时触发
 支持 latest_reported_activity_id 防重复推送
+支持 capability 注册机制
+支持 registry 命令路由
+支持查看已加载能力包
 ```
 
-这已经不只是一个 prompt 问答机器人，而是一个具备外部数据接入、工具调用、知识库检索、长期配置、远程交互入口和自动触发能力的个人 Agent 原型。
+这已经不只是一个 prompt 问答机器人，而是一个具备外部数据接入、工具调用、知识库检索、长期配置、远程交互入口、自动触发能力和 capability 扩展机制的个人 Agent 平台雏形。
 
 ## 6. 后续可继续扩展方向
 
@@ -499,15 +604,16 @@ main.py
 周报 / 月报
 训练计划生成
 比赛备赛周期规划
-多个 Agent 统一路由
 Web 后台管理页面
 VPS 部署和长期运行
+更多 capability 包
 ```
 
 未来如果加入博物馆项目，也可以复用当前架构：
 
 ```text
 src/runtime
+src/registry.py
 src/bot
 src/integrations
 data/knowledge
@@ -529,5 +635,5 @@ museum-education
 可以在简历中写成：
 
 ```text
-设计并实现个人多 Agent 平台 myMinions，基于 Python 构建可复用运行时层，支持 Discord 交互、LLM 调用、MCP 工具接入、长期记忆、RAG 知识库问答和定时任务触发。首个 Agent coros-report 接入 COROS 运动数据，通过 DeepSeek 生成个性化训练报告，支持自动检测新运动并推送到 Discord；同时基于跑步书籍 PDF 构建 embedding 检索知识库，实现中文训练问答。项目中解决了 MCP 授权地址匹配、Discord 频道权限控制、RAG 中文检索、embedding 批量限制、模型索引一致性和自动报告防重复推送等问题。
+设计并实现个人多 Agent 平台 myMinions，基于 Python 构建可复用运行时层和 capability 注册机制，支持 Discord 交互、LLM 调用、MCP 工具接入、长期记忆、RAG 知识库问答和定时任务触发。首个 capability coros-report 接入 COROS 运动数据，通过 DeepSeek 生成个性化训练报告，支持自动检测新运动并推送到 Discord；同时基于跑步书籍 PDF 构建 embedding 检索知识库，实现中文训练问答和运动主观感受记录。项目中解决了 MCP 授权地址匹配、Discord 频道权限控制、RAG 中文检索、embedding 批量限制、模型索引一致性、自动报告防重复推送和多能力路由扩展等问题。
 ```
