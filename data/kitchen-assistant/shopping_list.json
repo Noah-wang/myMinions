@@ -1,0 +1,102 @@
+[
+  {
+    "name": "牛肉馅",
+    "amount": "适量",
+    "note": "使用金产值和牛饼",
+    "source_recipe_id": "recipe-1",
+    "source_recipe": "宜家肉丸",
+    "source": "BV1ssdYB6EKu",
+    "status": "pending",
+    "added_at": "2026-08-14T17:58:17.866041+00:00"
+  },
+  {
+    "name": "面包糠",
+    "amount": "适量",
+    "note": "用牛奶浸泡",
+    "source_recipe_id": "recipe-1",
+    "source_recipe": "宜家肉丸",
+    "source": "BV1ssdYB6EKu",
+    "status": "pending",
+    "added_at": "2026-08-14T17:58:17.866045+00:00"
+  },
+  {
+    "name": "牛奶",
+    "amount": "适量",
+    "note": "倒入面包糠中搅拌",
+    "source_recipe_id": "recipe-1",
+    "source_recipe": "宜家肉丸",
+    "source": "BV1ssdYB6EKu",
+    "status": "pending",
+    "added_at": "2026-08-14T17:58:17.866047+00:00"
+  },
+  {
+    "name": "洋葱",
+    "amount": "1个",
+    "note": "切成碎末",
+    "source_recipe_id": "recipe-1",
+    "source_recipe": "宜家肉丸",
+    "source": "BV1ssdYB6EKu",
+    "status": "pending",
+    "added_at": "2026-08-14T17:58:17.866049+00:00"
+  },
+  {
+    "name": "大蒜",
+    "amount": "几瓣",
+    "note": "切成蒜碎",
+    "source_recipe_id": "recipe-1",
+    "source_recipe": "宜家肉丸",
+    "source": "BV1ssdYB6EKu",
+    "status": "pending",
+    "added_at": "2026-08-14T17:58:17.866051+00:00"
+  },
+  {
+    "name": "黄油",
+    "amount": "适量",
+    "note": "用于炒黄油面糊和煎肉丸",
+    "source_recipe_id": "recipe-1",
+    "source_recipe": "宜家肉丸",
+    "source": "BV1ssdYB6EKu",
+    "status": "pending",
+    "added_at": "2026-08-14T17:58:17.866052+00:00"
+  },
+  {
+    "name": "面粉",
+    "amount": "适量",
+    "note": "用于炒黄油面糊",
+    "source_recipe_id": "recipe-1",
+    "source_recipe": "宜家肉丸",
+    "source": "BV1ssdYB6EKu",
+    "status": "pending",
+    "added_at": "2026-08-14T17:58:17.866054+00:00"
+  },
+  {
+    "name": "牛骨高汤",
+    "amount": "适量",
+    "note": "制作酱汁用",
+    "source_recipe_id": "recipe-1",
+    "source_recipe": "宜家肉丸",
+    "source": "BV1ssdYB6EKu",
+    "status": "pending",
+    "added_at": "2026-08-14T17:58:17.866055+00:00"
+  },
+  {
+    "name": "蔬菜高汤",
+    "amount": "适量",
+    "note": "制作酱汁用",
+    "source_recipe_id": "recipe-1",
+    "source_recipe": "宜家肉丸",
+    "source": "BV1ssdYB6EKu",
+    "status": "pending",
+    "added_at": "2026-08-14T17:58:17.866057+00:00"
+  },
+  {
+    "name": "蔓越莓果酱",
+    "amount": "一勺",
+    "note": "最后搭配肉丸食用",
+    "source_recipe_id": "recipe-1",
+    "source_recipe": "宜家肉丸",
+    "source": "BV1ssdYB6EKu",
+    "status": "pending",
+    "added_at": "2026-08-14T17:58:17.866058+00:00"
+  }
+]

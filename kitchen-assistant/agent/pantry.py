@@ -9,6 +9,19 @@ DATA_DIR = ROOT_DIR / "data" / "kitchen-assistant"
 RECIPES_PATH = DATA_DIR / "recipes.json"
 SHOPPING_LIST_PATH = DATA_DIR / "shopping_list.json"
 PANTRY_PATH = DATA_DIR / "pantry.json"
+DEFAULT_SHELF_LIFE_DAYS = 7
+SHELF_LIFE_RULES: tuple[tuple[str, int, tuple[str, ...]], ...] = (
+    ("水产", 1, ("鱼", "虾", "蟹", "贝", "海鲜", "三文鱼", "鳕鱼")),
+    ("鸡蛋", 21, ("鸡蛋", "蛋")),
+    ("肉类", 2, ("鸡", "鸭", "牛", "猪", "羊", "肉", "排骨", "鸡腿", "鸡胸")),
+    ("豆制品", 2, ("豆腐", "豆皮", "豆干", "千张")),
+    ("叶菜", 3, ("生菜", "菠菜", "油麦菜", "青菜", "小白菜", "空心菜", "香菜")),
+    ("蔬菜", 4, ("西红柿", "番茄", "黄瓜", "土豆", "洋葱", "胡萝卜", "蘑菇", "茄子", "蔬菜")),
+    ("水果", 5, ("苹果", "香蕉", "橙", "莓", "葡萄", "梨", "桃", "水果")),
+    ("奶制品", 7, ("牛奶", "酸奶", "奶酪", "黄油", "淡奶油")),
+    ("主食", 30, ("米", "面", "粉", "面包", "吐司", "馒头")),
+    ("调料", 180, ("盐", "糖", "酱油", "生抽", "老抽", "醋", "料酒", "蚝油", "油", "香料")),
+)
 
 
 def _now() -> str:
@@ -59,6 +72,13 @@ def _parse_expiry(shelf_life: str) -> str:
     return ""
 
 
+def _infer_shelf_life(name: str) -> tuple[str, int]:
+    for category, days, keywords in SHELF_LIFE_RULES:
+        if any(keyword in name for keyword in keywords):
+            return category, days
+    return "默认", DEFAULT_SHELF_LIFE_DAYS
+
+
 def _days_until(expiry: str) -> int | None:
     if not expiry:
         return None
@@ -67,6 +87,16 @@ def _days_until(expiry: str) -> int | None:
     except ValueError:
         return None
     return (expires_on - datetime.now(UTC).date()).days
+
+
+def _is_active_pantry_item(item: dict[str, object]) -> bool:
+    return item.get("status", "active") == "active"
+
+
+def _matches_name(item_name: object, target_name: str) -> bool:
+    item_key = _lower(item_name)
+    target_key = target_name.strip().lower()
+    return item_key == target_key or target_key in item_key or item_key in target_key
 
 
 def _normalize_items(items: object) -> list[dict[str, str]]:
@@ -99,12 +129,44 @@ def _normalize_items(items: object) -> list[dict[str, str]]:
     return normalized
 
 
-def save_recipe_and_update_shopping_list(
+def _recipe_items(recipe: dict[str, object]) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    ingredients = recipe.get("ingredients")
+    seasonings = recipe.get("seasonings")
+
+    if isinstance(ingredients, list):
+        items.extend([item for item in ingredients if isinstance(item, dict)])
+    if isinstance(seasonings, list):
+        items.extend([item for item in seasonings if isinstance(item, dict)])
+
+    return items
+
+
+def _find_recipe(
+    recipes: list[dict[str, object]],
+    selector: str,
+) -> dict[str, object] | None:
+    target = selector.strip().lower()
+    if not target:
+        return None
+
+    for recipe in recipes:
+        if _lower(recipe.get("id")) == target:
+            return recipe
+
+    for recipe in recipes:
+        dish_name = _lower(recipe.get("dish_name"))
+        if dish_name == target or target in dish_name:
+            return recipe
+
+    return None
+
+
+def save_recipe(
     recipe: dict[str, object],
     source: str,
 ) -> str:
     recipes = _load_list(RECIPES_PATH)
-    shopping_items = _load_list(SHOPPING_LIST_PATH)
 
     dish_name = _text(recipe.get("dish_name")) or "未命名菜谱"
     recipe_id = f"recipe-{len(recipes) + 1}"
@@ -124,17 +186,35 @@ def save_recipe_and_update_shopping_list(
     }
     recipes.append(saved_recipe)
 
-    for item in [
-        *saved_recipe["ingredients"],
-        *saved_recipe["seasonings"],
-    ]:
+    _write_list(RECIPES_PATH, recipes)
+
+    item_count = len(_recipe_items(saved_recipe))
+    return (
+        f"已保存《{dish_name}》（{recipe_id}），识别到 {item_count} 个采购项。\n"
+        f"需要加入采购清单时发送：!kitchen plan {recipe_id}"
+    )
+
+
+def add_recipe_to_shopping_list(selector: str) -> str:
+    recipes = _load_list(RECIPES_PATH)
+    recipe = _find_recipe(recipes, selector)
+    if recipe is None:
+        return f"没有找到菜谱：{selector}。可以先用 !kitchen recipes 查看。"
+
+    shopping_items = _load_list(SHOPPING_LIST_PATH)
+    dish_name = _text(recipe.get("dish_name")) or "未命名菜谱"
+    recipe_id = _text(recipe.get("id"))
+    source = _text(recipe.get("source"))
+    added_count = 0
+
+    for item in _recipe_items(recipe):
         if not isinstance(item, dict):
             continue
         shopping_items.append(
             {
-                "name": item["name"],
-                "amount": item["amount"],
-                "note": item["note"],
+                "name": _text(item.get("name")),
+                "amount": _text(item.get("amount")),
+                "note": _text(item.get("note")),
                 "source_recipe_id": recipe_id,
                 "source_recipe": dish_name,
                 "source": source,
@@ -142,14 +222,30 @@ def save_recipe_and_update_shopping_list(
                 "added_at": _now(),
             }
         )
+        added_count += 1
 
-    _write_list(RECIPES_PATH, recipes)
     _write_list(SHOPPING_LIST_PATH, shopping_items)
 
     pending_count = len(
         [item for item in shopping_items if item.get("status") == "pending"]
     )
-    return f"已保存《{dish_name}》，并把食材加入采购清单。当前待采购 {pending_count} 项。"
+    return f"已把《{dish_name}》加入采购清单，新增 {added_count} 项。当前待采购 {pending_count} 项。"
+
+
+def format_saved_recipes() -> str:
+    recipes = _load_list(RECIPES_PATH)
+    if not recipes:
+        return "还没有保存菜谱。先用 !kitchen add <B站BV号或链接> 添加。"
+
+    lines = ["已保存菜谱："]
+    for recipe in recipes[-20:]:
+        recipe_id = _text(recipe.get("id"))
+        dish_name = _text(recipe.get("dish_name")) or "未命名菜谱"
+        item_count = len(_recipe_items(recipe))
+        source = _text(recipe.get("source"))
+        lines.append(f"- {recipe_id}：{dish_name}（{item_count} 项） {source}")
+    lines.append("加入采购清单：!kitchen plan <菜谱ID或菜名>")
+    return "\n".join(lines)
 
 
 def format_shopping_list() -> str:
@@ -177,8 +273,6 @@ def format_shopping_list() -> str:
 def record_purchase(
     name: str,
     amount: str,
-    storage: str,
-    shelf_life: str,
 ) -> str:
     item_name = name.strip()
     if not item_name:
@@ -186,26 +280,28 @@ def record_purchase(
 
     pantry_items = _load_list(PANTRY_PATH)
     shopping_items = _load_list(SHOPPING_LIST_PATH)
+    category, shelf_life_days = _infer_shelf_life(item_name)
+    shelf_life = f"{shelf_life_days}天"
     expires_at = _parse_expiry(shelf_life)
 
     pantry_items.append(
         {
             "name": item_name,
             "amount": amount.strip(),
-            "storage": storage.strip(),
+            "category": category,
             "shelf_life": shelf_life.strip(),
+            "shelf_life_days": shelf_life_days,
             "expires_at": expires_at,
+            "status": "active",
             "created_at": _now(),
         }
     )
 
     marked_count = 0
-    item_key = item_name.lower()
     for item in shopping_items:
         if item.get("status") != "pending":
             continue
-        shopping_name = _lower(item.get("name"))
-        if shopping_name == item_key or item_key in shopping_name or shopping_name in item_key:
+        if _matches_name(item.get("name"), item_name):
             item["status"] = "bought"
             item["bought_at"] = _now()
             marked_count += 1
@@ -216,11 +312,13 @@ def record_purchase(
 
     expiry_text = f"，预计 {expires_at} 过期" if expires_at else ""
     marked_text = "，并已从采购清单标记 1 项" if marked_count else ""
-    return f"已记录：{item_name} {amount.strip()}，{storage.strip()}{expiry_text}{marked_text}。"
+    return f"已记录：{item_name} {amount.strip()}，按{category}默认保质期 {shelf_life}{expiry_text}{marked_text}。"
 
 
 def format_pantry() -> str:
-    pantry_items = _load_list(PANTRY_PATH)
+    pantry_items = [
+        item for item in _load_list(PANTRY_PATH) if _is_active_pantry_item(item)
+    ]
     if not pantry_items:
         return "当前库存是空的。"
 
@@ -228,7 +326,7 @@ def format_pantry() -> str:
     for index, item in enumerate(pantry_items, start=1):
         name = _text(item.get("name"))
         amount = _text(item.get("amount"))
-        storage = _text(item.get("storage"))
+        category = _text(item.get("category")) or "未分类"
         expires_at = _text(item.get("expires_at"))
         days = _days_until(expires_at)
 
@@ -241,13 +339,15 @@ def format_pantry() -> str:
             else:
                 expiry_text = f"，还剩 {days} 天"
 
-        lines.append(f"{index}. {name} {amount}，{storage}{expiry_text}")
+        lines.append(f"{index}. {name} {amount}，{category}{expiry_text}")
     return "\n".join(lines)
 
 
 def format_expiring(days: int = 3) -> str:
     expiring_items: list[tuple[int, dict[str, object]]] = []
     for item in _load_list(PANTRY_PATH):
+        if not _is_active_pantry_item(item):
+            continue
         expires_at = _text(item.get("expires_at"))
         remaining = _days_until(expires_at)
         if remaining is None:
@@ -277,11 +377,13 @@ def format_expiring(days: int = 3) -> str:
 
 def recommend_today() -> str:
     recipes = _load_list(RECIPES_PATH)
-    pantry_items = _load_list(PANTRY_PATH)
+    pantry_items = [
+        item for item in _load_list(PANTRY_PATH) if _is_active_pantry_item(item)
+    ]
     if not recipes:
         return "还没有保存菜谱。先用 !kitchen add <B站BV号或链接> 添加一个。"
     if not pantry_items:
-        return "当前库存是空的。先用 !kitchen bought <食材> <数量> <保存方式> <保质期> 记录采购。"
+        return "当前库存是空的。先用 !kitchen bought <食材> <数量> 记录采购。"
 
     pantry_names = [_lower(item.get("name")) for item in pantry_items]
     scored: list[tuple[int, int, dict[str, object], list[str], list[str]]] = []
@@ -335,3 +437,50 @@ def recommend_today() -> str:
             f"   来源：{source}"
         )
     return "\n".join(lines)
+
+
+def remove_shopping_item(name: str) -> str:
+    item_name = name.strip()
+    if not item_name:
+        return "请提供要移除的采购项名称。"
+
+    shopping_items = _load_list(SHOPPING_LIST_PATH)
+    for item in shopping_items:
+        if item.get("status") != "pending":
+            continue
+        if not _matches_name(item.get("name"), item_name):
+            continue
+
+        removed_name = _text(item.get("name"))
+        item["status"] = "removed"
+        item["removed_at"] = _now()
+        _write_list(SHOPPING_LIST_PATH, shopping_items)
+        return f"已从采购清单移除：{removed_name}。"
+
+    return f"没有找到待采购项：{item_name}。"
+
+
+def use_pantry_item(name: str, amount: str) -> str:
+    item_name = name.strip()
+    if not item_name:
+        return "请提供要消耗的食材名称。"
+
+    pantry_items = _load_list(PANTRY_PATH)
+    for item in pantry_items:
+        if not _is_active_pantry_item(item):
+            continue
+        if not _matches_name(item.get("name"), item_name):
+            continue
+
+        used_name = _text(item.get("name"))
+        recorded_amount = _text(item.get("amount"))
+        item["status"] = "used"
+        item["used_amount"] = amount.strip()
+        item["used_at"] = _now()
+        _write_list(PANTRY_PATH, pantry_items)
+
+        amount_text = f" {amount.strip()}" if amount.strip() else ""
+        recorded_text = f"（原记录：{recorded_amount}）" if recorded_amount else ""
+        return f"已记录消耗：{used_name}{amount_text}{recorded_text}。"
+
+    return f"库存里没有找到可消耗的食材：{item_name}。"

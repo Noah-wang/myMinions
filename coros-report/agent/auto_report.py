@@ -1,6 +1,7 @@
 import json
 import os
-from datetime import date, timedelta
+import re
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import discord
@@ -18,6 +19,24 @@ _job_running = False
 
 def _date_text(day: date) -> str:
     return day.strftime("%Y%m%d")
+
+
+def _log_timestamp() -> str:
+    return datetime.now(UTC).astimezone().isoformat(timespec="seconds")
+
+
+def _activity_log_summary(activity: dict[str, Any]) -> str:
+    return (
+        f"activity_key={activity_key(activity)} "
+        f"labelId={activity.get('labelId')} "
+        f"sportType={activity.get('sportType')} "
+        f"startTimestamp={activity.get('startTimestamp')} "
+        f"endTimestamp={activity.get('endTimestamp')}"
+    )
+
+
+def _log_auto_report(message: str) -> None:
+    print(f"[{_log_timestamp()}] coros-auto-report {message}", flush=True)
 
 
 def _activity_query_arguments() -> dict[str, Any]:
@@ -48,6 +67,38 @@ def _parse_json_text(text: str) -> Any:
         return None
 
 
+def _records_from_text(text: str) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for block in text.split("\n\n"):
+        label_match = re.search(r"LabelId:\s*(\d+)", block)
+        sport_match = re.search(r"SportType:\s*(\d+)", block)
+        start_match = re.search(r"startTimestamp=(\d+)", block)
+        end_match = re.search(r"endTimestamp=(\d+)", block)
+        if label_match is None or sport_match is None:
+            continue
+
+        record: dict[str, Any] = {
+            "labelId": label_match.group(1),
+            "sportType": int(sport_match.group(1)),
+        }
+        if start_match is not None:
+            record["startTimestamp"] = int(start_match.group(1))
+        if end_match is not None:
+            record["endTimestamp"] = int(end_match.group(1))
+
+        title_match = re.search(r"\d+\.\s+(.+?)\s+—\s+(\d{4}-\d{2}-\d{2})", block)
+        if title_match is not None:
+            record["sportName"] = title_match.group(1).strip()
+            record["date"] = title_match.group(2)
+
+        distance_match = re.search(r"Distance:\s*([0-9.]+)\s*km", block)
+        if distance_match is not None:
+            record["distanceKm"] = float(distance_match.group(1))
+
+        records.append(record)
+    return records
+
+
 def _expand_payload(value: Any) -> list[Any]:
     expanded = [value]
     if isinstance(value, dict):
@@ -55,9 +106,11 @@ def _expand_payload(value: Any) -> list[Any]:
         if isinstance(content, list):
             for item in content:
                 if isinstance(item, dict) and isinstance(item.get("text"), str):
-                    parsed = _parse_json_text(item["text"])
+                    text = item["text"]
+                    parsed = _parse_json_text(text)
                     if parsed is not None:
                         expanded.extend(_expand_payload(parsed))
+                    expanded.extend(_records_from_text(text))
         for key in ("data", "records", "activities", "list", "items", "result"):
             child = value.get(key)
             if child is not None:
@@ -253,7 +306,10 @@ async def check_and_send_coros_auto_report(
 
         activity = await latest_coros_activity()
         if activity is None:
+            _log_auto_report("activity_lookup records=0")
             return "COROS auto report skipped: no recent activity found."
+
+        _log_auto_report(f"activity_lookup records>=1 {_activity_log_summary(activity)}")
 
         if not force_send and not should_send_activity(activity):
             message = "COROS auto report skipped: no new activity."
@@ -280,14 +336,16 @@ async def check_and_send_coros_auto_report(
 
 
 async def _scheduled_check(client: discord.Client) -> None:
+    started_at = datetime.now(UTC)
+    _log_auto_report("check_start")
     result = await check_and_send_coros_auto_report(client)
-    if result != "COROS auto report skipped: no new activity.":
-        print(result)
+    elapsed = (datetime.now(UTC) - started_at).total_seconds()
+    _log_auto_report(f"check_end elapsed={elapsed:.1f}s result={result}")
 
 
 def register_coros_auto_report(client: discord.Client) -> None:
     if not _auto_report_enabled():
-        print("COROS auto report scheduler is disabled.")
+        _log_auto_report("scheduler_disabled")
         return
 
     add_interval_job(
@@ -296,4 +354,4 @@ def register_coros_auto_report(client: discord.Client) -> None:
         _poll_minutes(),
         args=[client],
     )
-    print(f"COROS auto report scheduler started: every {_poll_minutes()} minutes.")
+    _log_auto_report(f"scheduler_started poll_minutes={_poll_minutes()}")

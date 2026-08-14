@@ -80,6 +80,7 @@ def build_coros_capability() -> Capability:
     return Capability(
         name="coros-report",
         description="读取 COROS 运动数据，生成训练报告，回答跑步问题，并记录主观感受。",
+        channel_env_name="DISCORD_RUNNING_CHANNEL_ID",
         text_commands=(
             TextCommand("coros", "生成 COROS 运动报告", _coros_report),
             TextCommand("coros-tools", "列出 COROS MCP 工具", _coros_tools),

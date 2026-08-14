@@ -1,10 +1,14 @@
 from pantry import (
+    add_recipe_to_shopping_list,
     format_expiring,
     format_pantry,
+    format_saved_recipes,
     format_shopping_list,
     recommend_today,
     record_purchase,
-    save_recipe_and_update_shopping_list,
+    remove_shopping_item,
+    save_recipe,
+    use_pantry_item,
 )
 from recipe_extractor import extract_recipe_from_subtitle
 from src.runtime.capability import Capability, CommandContext, TextCommand
@@ -22,8 +26,24 @@ async def _kitchen(context: CommandContext, argument: str) -> None:
         await context.send(format_shopping_list())
         return
 
+    if action == "recipes":
+        await context.send(format_saved_recipes())
+        return
+
+    if action == "plan":
+        await context.send(add_recipe_to_shopping_list(rest.strip()))
+        return
+
+    if action == "remove-shopping":
+        await context.send(remove_shopping_item(rest.strip()))
+        return
+
     if action == "bought":
         await context.send(_record_purchase_from_text(rest.strip()))
+        return
+
+    if action == "use":
+        await context.send(_use_pantry_item_from_text(rest.strip()))
         return
 
     if action == "pantry":
@@ -41,8 +61,12 @@ async def _kitchen(context: CommandContext, argument: str) -> None:
     await context.send(
         "可用命令：\n"
         "!kitchen add <B站BV号或链接>\n"
+        "!kitchen recipes\n"
+        "!kitchen plan <菜谱ID或菜名>\n"
         "!kitchen shopping\n"
-        "!kitchen bought <食材> <数量> <保存方式> <保质期>\n"
+        "!kitchen remove-shopping <食材>\n"
+        "!kitchen bought <食材> <数量>\n"
+        "!kitchen use <食材> <数量>\n"
         "!kitchen pantry\n"
         "!kitchen today\n"
         "!kitchen expiring"
@@ -64,7 +88,7 @@ async def _add_recipe(context: CommandContext, video_input: str) -> None:
     await context.send("字幕已抓到，正在提取菜谱和采购项...")
     try:
         recipe = await extract_recipe_from_subtitle(video_input, subtitle)
-        result = save_recipe_and_update_shopping_list(recipe, video_input)
+        result = save_recipe(recipe, video_input)
     except Exception as exc:
         await context.send(f"提取菜谱失败：{exc}")
         return
@@ -73,21 +97,30 @@ async def _add_recipe(context: CommandContext, video_input: str) -> None:
 
 
 def _record_purchase_from_text(argument: str) -> str:
-    parts = argument.split(maxsplit=3)
+    parts = argument.split(maxsplit=1)
     if len(parts) < 2:
-        return "用法：!kitchen bought <食材> <数量> <保存方式> <保质期>，例如：!kitchen bought 鸡腿 1000g 冷藏 3天"
+        return "用法：!kitchen bought <食材> <数量>，例如：!kitchen bought 鸡腿 1000g"
 
     name = parts[0]
     amount = parts[1]
-    storage = parts[2] if len(parts) >= 3 else ""
-    shelf_life = parts[3] if len(parts) >= 4 else ""
-    return record_purchase(name, amount, storage, shelf_life)
+    return record_purchase(name, amount)
+
+
+def _use_pantry_item_from_text(argument: str) -> str:
+    parts = argument.split(maxsplit=1)
+    if len(parts) < 1 or not parts[0]:
+        return "用法：!kitchen use <食材> <数量>，例如：!kitchen use 鸡腿 500g"
+
+    name = parts[0]
+    amount = parts[1] if len(parts) >= 2 else ""
+    return use_pantry_item(name, amount)
 
 
 def build_kitchen_capability() -> Capability:
     return Capability(
         name="kitchen-assistant",
         description="从 B站做菜视频提取菜谱，并维护采购清单。",
+        channel_env_name="DISCORD_COOKING_CHANNEL_ID",
         text_commands=(
             TextCommand(
                 "kitchen",

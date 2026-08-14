@@ -32,5 +32,6 @@ class TextCommand:
 class Capability:
     name: str
     description: str
+    channel_env_name: str | None = None
     text_commands: tuple[TextCommand, ...] = ()
     startup_handlers: tuple[StartupHandler, ...] = field(default_factory=tuple)

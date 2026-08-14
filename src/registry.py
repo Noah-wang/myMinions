@@ -8,10 +8,12 @@ class CapabilityRegistry:
     def __init__(self, capabilities: list[Capability]) -> None:
         self._capabilities = capabilities
         self._commands: dict[str, TextCommand] = {}
+        self._command_capabilities: dict[str, Capability] = {}
         for capability in capabilities:
             for command in capability.text_commands:
                 for name in command.names:
                     self._commands[name] = command
+                    self._command_capabilities[name] = capability
 
     def describe(self) -> str:
         lines = ["当前已加载的 capabilities："]
@@ -26,6 +28,19 @@ class CapabilityRegistry:
         for capability in self._capabilities:
             for handler in capability.startup_handlers:
                 handler(client)
+
+    def channel_env_for_command(self, command_name: str) -> str | None:
+        capability = self._command_capabilities.get(command_name)
+        if capability is None:
+            return None
+        return capability.channel_env_name
+
+    def channel_env_names(self) -> tuple[str, ...]:
+        names: list[str] = []
+        for capability in self._capabilities:
+            if capability.channel_env_name is not None:
+                names.append(capability.channel_env_name)
+        return tuple(dict.fromkeys(names))
 
     async def dispatch_command(
         self, context: CommandContext, command_name: str, argument: str = ""

@@ -1,12 +1,14 @@
-# myMinions / coros-report 项目迭代报告
+# myMinions 项目迭代报告
 
 ## 1. 项目背景
 
 本项目最初从学习 `pi agent` 开始，目标是理解 CLI/TUI、Agent、Skill、MCP、API 等概念，并在此基础上开发一个个人可扩展的 Agent 系统。
 
-后续项目方向逐渐明确为：构建一个属于自己的多 Agent 平台 `myMinions`，先实现第一个运动分析 Agent：`coros-report`。
+后续项目方向逐渐明确为：构建一个属于自己的多 Agent 平台 `myMinions`，先实现运动分析能力 `coros-report`，再扩展厨房采购能力 `kitchen-assistant`。
 
 `coros-report` 的目标是接入 COROS 官方运动数据，通过大模型生成个性化运动报告，并进一步支持基于跑步书籍的训练问答。
+
+`kitchen-assistant` 的目标是接入 B 站做菜视频字幕，从视频中提取菜谱，保存菜谱库，并支持选择菜谱加入采购清单、记录买回来的库存、提醒快过期食材和推荐今天可以做什么。
 
 ## 2. 项目结构演进
 
@@ -22,9 +24,12 @@ myMinions/
 ├── coros-report/
 │   ├── agent/            # coros-report 专属 capability 逻辑
 │   └── docs/             # coros-report 文档
+├── kitchen-assistant/
+│   └── agent/            # kitchen-assistant 专属 capability 逻辑
 ├── data/
-│   ├── memory.json       # 记忆
-│   └── knowledge/        # RAG 知识库
+│   ├── memory.json             # 记忆
+│   ├── knowledge/              # RAG 知识库
+│   └── kitchen-assistant/      # 菜谱、采购清单、库存数据
 ├── docs/                 # 项目级文档
 └── scripts/
     └── ingest_books.py   # PDF 导入脚本
@@ -41,6 +46,8 @@ coros_capability.py = 把 coros-report 包装成第一个 capability
 auto_report.py = coros-report 专属业务逻辑，负责查新运动和生成报告
 scheduler.py = 通用触发器，负责什么时候执行
 discord_bot.py = 交互入口，只负责接收消息并交给 registry
+kitchen_capability.py = kitchen-assistant 的命令入口
+pantry.py = 菜谱、采购清单、库存、保质期和今日推荐逻辑
 ```
 
 ## 3. 已添加的核心功能
@@ -90,6 +97,16 @@ DEEPSEEK_MODEL=deepseek-chat
 /feel
 /feelings
 /capabilities
+/kitchen-add
+/kitchen-recipes
+/kitchen-plan
+/kitchen-shopping
+/kitchen-remove-shopping
+/kitchen-bought
+/kitchen-use
+/kitchen-pantry
+/kitchen-today
+/kitchen-expiring
 
 !coros
 !coros-tools
@@ -97,15 +114,26 @@ DEEPSEEK_MODEL=deepseek-chat
 !feel
 !feelings
 !capabilities
+!kitchen add
+!kitchen recipes
+!kitchen plan
+!kitchen shopping
+!kitchen remove-shopping
+!kitchen bought
+!kitchen use
+!kitchen pantry
+!kitchen today
+!kitchen expiring
 ```
 
-并且限制只能在指定频道使用：
+并且按 capability 限制指定频道使用：
 
 ```env
 DISCORD_RUNNING_CHANNEL_ID=1537316749622386718
+DISCORD_COOKING_CHANNEL_ID=1537873359130333184
 ```
 
-这样可以避免机器人在其他频道乱响应。
+这样可以避免机器人在其他频道乱响应。运动相关命令只在 running 频道生效，厨房相关命令只在 cooking 频道生效。
 
 ### 3.4 记忆模块
 
@@ -295,6 +323,144 @@ coros-report/agent/coros_capability.py
 用于查看当前加载的能力包。
 
 这次重构后，`coros-report` 不再是整个系统本身，而是 `myMinions` 主框架里的第一个能力包。未来新增 `museum-guide`、`calendar-agent`、`study-agent` 等能力时，可以按同样方式新增 capability，而不是继续把逻辑堆进 `discord_bot.py`。
+
+### 3.9 Python 项目迁移到 uv
+
+为了让本地和服务器部署环境更稳定，项目从单纯的 `requirements.txt` 迁移到 `uv` 管理。
+
+新增：
+
+```text
+pyproject.toml
+= 定义 Python 项目依赖
+
+uv.lock
+= 锁定实际安装版本
+```
+
+新的运行方式：
+
+```bash
+uv sync
+uv run python src/main.py
+```
+
+导入跑步书籍：
+
+```bash
+uv run python scripts/ingest_books.py
+```
+
+原来的 `.venv` 使用方式仍然可以保留，但后续本地和 VPS 更推荐用 `uv sync` 和 `uv run`。
+
+### 3.10 kitchen-assistant 厨房采购能力
+
+项目新增第二个 capability：`kitchen-assistant`。它和 `coros-report` 平行，不是写进 `coros-report` 里的子功能。
+
+核心流程从最初的“发送视频后直接加入采购清单”，调整为更可控的两段式流程：
+
+```text
+发送 B站 BV号或链接
+-> 抓取视频字幕
+-> DeepSeek 从字幕提取菜名、食材、调料、步骤
+-> 只保存菜谱
+-> 用户选择某个菜谱
+-> 再加入采购清单
+```
+
+这样可以避免每收藏一个视频都自动污染下次购物清单。
+
+当前 kitchen 文本命令：
+
+```text
+!kitchen add <B站BV号或链接>
+= 抓字幕并保存菜谱，不自动加入采购清单
+
+!kitchen recipes
+= 查看已保存菜谱
+
+!kitchen plan <菜谱ID或菜名>
+= 选择菜谱并加入采购清单
+
+!kitchen shopping
+= 查看待采购清单
+
+!kitchen remove-shopping <食材>
+= 从待采购清单移除一项
+
+!kitchen bought <食材> <数量>
+= 记录买回来的食材，并自动估算保质期
+
+!kitchen use <食材> <数量>
+= 记录消耗食材，让它从当前库存中消失
+
+!kitchen pantry
+= 查看当前库存
+
+!kitchen expiring
+= 查看未来 3 天内快过期食材
+
+!kitchen today
+= 根据库存匹配已保存菜谱，推荐今天可以做什么
+```
+
+对应 Discord slash command：
+
+```text
+/kitchen-add
+/kitchen-recipes
+/kitchen-plan
+/kitchen-shopping
+/kitchen-remove-shopping
+/kitchen-bought
+/kitchen-use
+/kitchen-pantry
+/kitchen-expiring
+/kitchen-today
+```
+
+`kitchen-bought` 最初需要输入食材、数量、保存方式、保质期。后续为了降低使用成本，改成只输入：
+
+```text
+食材 + 数量
+```
+
+例如：
+
+```text
+!kitchen bought 鸡腿 1000g
+```
+
+系统根据食材名自动估算保质期：
+
+```text
+水产：1天
+肉类：2天
+豆制品：2天
+叶菜：3天
+蔬菜：4天
+水果：5天
+奶制品：7天
+鸡蛋：21天
+主食：30天
+调料：180天
+默认：7天
+```
+
+数据文件：
+
+```text
+data/kitchen-assistant/recipes.json
+= 已保存菜谱
+
+data/kitchen-assistant/shopping_list.json
+= 采购清单，使用 pending / bought / removed 状态
+
+data/kitchen-assistant/pantry.json
+= 当前库存，使用 active / used 状态
+```
+
+这个设计保留历史记录，但列表展示时只显示当前有效项。
 
 ## 4. 主要问题与解决方案
 
@@ -570,6 +736,173 @@ Discord bot
 
 这让 `myMinions` 从单一业务 Agent 应用，升级成一个可以继续扩展多个能力包的小型 Agent 平台。
 
+### 问题 14：B站字幕工具安装后找不到 MCP 模块
+
+运行：
+
+```bash
+bilibili-subtitle-fetch init
+```
+
+出现：
+
+```text
+ModuleNotFoundError: No module named 'mcp.server.fastmcp'
+```
+
+原因是 `bilibili-subtitle-fetch` 依赖旧版 MCP 的 `mcp.server.fastmcp` 路径，但 uv tool 安装时解析到了 `mcp 2.0.0`，新版 MCP 中路径已经变化。
+
+解决方案：
+
+```bash
+uv tool install --python 3.13 --force bilibili-subtitle-fetch --with "mcp[cli]<2.0.0"
+```
+
+这样把 `bilibili-subtitle-fetch` 的独立工具环境限制在兼容的 MCP 1.x 版本。
+
+### 问题 15：B站 Cookie 配置文件不在默认路径
+
+最初运行字幕抓取时出现：
+
+```text
+Error: Credential config not found. Run `bilibili-subtitle-fetch init` first.
+```
+
+原因是 Cookie 配置被放到了 `kitchen-assistant` 目录下，而工具默认只会去：
+
+```text
+~/.config/bilibili-subtitle-fetch/config.toml
+```
+
+解决方案：
+
+```text
+在 subtitle_fetcher.py 中固定传入 --config
+默认读取 kitchen-assistant/config.toml
+同时支持 BILIBILI_SUBTITLE_CONFIG 环境变量覆盖
+```
+
+并在 `.gitignore` 中忽略：
+
+```text
+kitchen-assistant/config.toml
+```
+
+避免把 B站 Cookie 上传到 GitHub。
+
+### 问题 16：添加视频后自动加入采购清单不够可控
+
+最初 `!kitchen add` 的行为是：
+
+```text
+抓字幕
+-> 提取菜谱
+-> 自动把所有食材加入采购清单
+```
+
+问题是：用户只是想收藏一个菜谱时，也会污染下次采购清单。
+
+解决方案：
+
+```text
+!kitchen add
+= 只保存菜谱
+
+!kitchen recipes
+= 查看已保存菜谱
+
+!kitchen plan <菜谱ID或菜名>
+= 用户确认后，再把该菜谱加入采购清单
+```
+
+调整后，菜谱库和采购计划被拆开，使用更接近真实采购流程。
+
+### 问题 17：采购入库命令输入成本太高
+
+最初 `kitchen-bought` 需要输入：
+
+```text
+食材、数量、保存方式、保质期
+```
+
+问题是实际买菜时录入太麻烦。
+
+解决方案：
+
+```text
+用户只输入食材和数量
+系统根据食材类别自动估算保质期
+库存记录保留 category、shelf_life_days、expires_at
+```
+
+这样 `!kitchen bought 鸡腿 1000g` 就能自动判断为肉类，默认 2 天过期。
+
+### 问题 18：采购清单和库存需要删除/消耗
+
+如果用户不想买某个采购项，或者食材已经做饭用掉，列表需要能变干净。
+
+解决方案：
+
+```text
+!kitchen remove-shopping <食材>
+= 把待采购项从 pending 标记为 removed
+
+!kitchen use <食材> <数量>
+= 把库存项从 active 标记为 used
+```
+
+这不是物理删除，而是状态变更。当前列表不再显示这些项目，但历史数据仍然保留，后续可以用于统计和复盘。
+
+### 问题 19：Training Hub 能看到运动，但自动报告查不到记录
+
+用户跑完步一个多小时后，COROS Training Hub 网站已经能看到本次运动，但自动报告没有推送。终端日志显示：
+
+```text
+coros-auto-report activity_lookup records=0
+COROS auto report skipped: no recent activity found.
+```
+
+一开始排查了 Discord、scheduler、`.env` 和 memory：
+
+```text
+bot 进程正常运行
+COROS_AUTO_REPORT_ENABLED=true
+COROS_AUTO_REPORT_POLL_MINUTES=15
+DISCORD_RUNNING_CHANNEL_ID 已配置
+memory.json 里 latest_reported_activity_id 为空
+```
+
+随后直接调用 COROS MCP，发现 `queryUserInfo` 和 `queryDevices` 能返回数据，说明授权并没有完全失败。进一步扩大日期范围并查询 `querySportRecords` 后，发现 COROS MCP 实际返回了 2026-08-14 的 10.01 km 室内跑：
+
+```text
+Indoor Run — 2026-08-14
+Distance: 10.01 km
+Average Pace: 4:43 /km
+Avg HR: 162 bpm
+LabelId: 479624756220428391
+SportType: 101
+```
+
+根因是：COROS MCP 的 `querySportRecords` 返回内容是 `content[0].text` 里的文本摘要，而不是结构化 JSON。原来的 `_activity_records()` 只会解析 JSON 对象，所以把真实存在的 8 条运动记录误判为 0 条。
+
+解决方案：
+
+```text
+在 auto_report.py 中新增文本解析逻辑
+从 COROS 文本摘要中提取 LabelId、SportType、startTimestamp、endTimestamp、日期和距离
+让 latest_coros_activity() 能识别文本格式返回的活动记录
+自动检查日志中增加 activity_key、labelId、sportType、时间戳等诊断信息
+```
+
+修复后，自动报告可以正确识别最新运动：
+
+```text
+activity_key=479624756220428391:101:1786737854:1786741430
+date=2026-08-14
+distanceKm=10.01
+sportType=101
+```
+
 ## 5. 当前项目能力总结
 
 当前 `coros-report` 已经具备：
@@ -585,6 +918,8 @@ Discord bot
 支持 embedding 语义检索
 支持关键词检索兜底
 支持自动检测新运动并推送报告
+支持解析 COROS MCP 文本格式活动列表
+支持自动检查日志和 activity_key 诊断
 支持 scheduler 定时触发
 支持 latest_reported_activity_id 防重复推送
 支持 capability 注册机制
@@ -592,7 +927,24 @@ Discord bot
 支持查看已加载能力包
 ```
 
-这已经不只是一个 prompt 问答机器人，而是一个具备外部数据接入、工具调用、知识库检索、长期配置、远程交互入口、自动触发能力和 capability 扩展机制的个人 Agent 平台雏形。
+当前 `kitchen-assistant` 已经具备：
+
+```text
+接入 B站字幕抓取工具
+从字幕中提取菜谱
+保存菜谱库
+按菜谱 ID 或菜名加入采购清单
+查看和移除待采购项
+记录已采购食材
+根据食材类型自动估算保质期
+查看当前库存
+记录食材消耗
+查看快过期食材
+根据库存推荐今天可以做什么
+限制只在 cooking 频道响应
+```
+
+这已经不只是一个 prompt 问答机器人，而是一个具备外部数据接入、工具调用、知识库检索、长期配置、远程交互入口、自动触发能力、采购库存状态管理和 capability 扩展机制的个人 Agent 平台雏形。
 
 ## 6. 后续可继续扩展方向
 
@@ -604,6 +956,12 @@ Discord bot
 周报 / 月报
 训练计划生成
 比赛备赛周期规划
+kitchen 菜谱去重
+kitchen 食材重量精确扣减
+kitchen 购物清单合并同类项
+kitchen 菜谱偏好记忆
+kitchen 周菜单规划
+kitchen 自动过期提醒
 Web 后台管理页面
 VPS 部署和长期运行
 更多 capability 包
@@ -635,5 +993,5 @@ museum-education
 可以在简历中写成：
 
 ```text
-设计并实现个人多 Agent 平台 myMinions，基于 Python 构建可复用运行时层和 capability 注册机制，支持 Discord 交互、LLM 调用、MCP 工具接入、长期记忆、RAG 知识库问答和定时任务触发。首个 capability coros-report 接入 COROS 运动数据，通过 DeepSeek 生成个性化训练报告，支持自动检测新运动并推送到 Discord；同时基于跑步书籍 PDF 构建 embedding 检索知识库，实现中文训练问答和运动主观感受记录。项目中解决了 MCP 授权地址匹配、Discord 频道权限控制、RAG 中文检索、embedding 批量限制、模型索引一致性、自动报告防重复推送和多能力路由扩展等问题。
+设计并实现个人多 Agent 平台 myMinions，基于 Python 构建可复用运行时层和 capability 注册机制，支持 Discord 交互、LLM 调用、MCP 工具接入、长期记忆、RAG 知识库问答、定时任务触发和多频道命令路由。首个 capability coros-report 接入 COROS 运动数据，通过 DeepSeek 生成个性化训练报告，支持自动检测新运动并推送到 Discord；同时基于跑步书籍 PDF 构建 embedding 检索知识库，实现中文训练问答和运动主观感受记录。第二个 capability kitchen-assistant 接入 B站字幕抓取工具，从做菜视频中提取菜谱，支持菜谱库、选择菜谱加入采购清单、采购入库、自动保质期估算、库存消耗、快过期提醒和基于库存的做菜推荐。项目中解决了 MCP 授权地址匹配、Discord 频道权限控制、RAG 中文检索、embedding 批量限制、模型索引一致性、自动报告防重复推送、COROS MCP 文本格式解析、B站字幕工具版本兼容、Cookie 安全配置和多能力路由扩展等问题。
 ```
