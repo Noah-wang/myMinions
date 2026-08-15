@@ -20,12 +20,14 @@ myMinions/
 │   ├── bot/              # Discord 交互层
 │   ├── runtime/          # 可复用运行时能力
 │   ├── integrations/     # 外部服务接入
-│   └── registry.py       # capability 注册与命令路由
-├── coros-report/
-│   ├── agent/            # coros-report 专属 capability 逻辑
-│   └── docs/             # coros-report 文档
-├── kitchen-assistant/
-│   └── agent/            # kitchen-assistant 专属 capability 逻辑
+│   ├── orchestrator.py   # 主 Agent 调度层
+│   └── registry.py       # capability 注册与命令映射
+├── agents/
+│   ├── coros-report/
+│   │   ├── agent/        # coros-report 专属 capability 逻辑
+│   │   └── docs/         # coros-report 文档
+│   └── kitchen-assistant/
+│       └── agent/        # kitchen-assistant 专属 capability 逻辑
 ├── data/
 │   ├── memory.json             # 记忆
 │   ├── knowledge/              # RAG 知识库
@@ -41,11 +43,12 @@ myMinions/
 
 ```text
 capability.py = 定义能力包、文本命令和执行上下文
-registry.py = 注册能力包并路由命令
+registry.py = 注册能力包并维护 command -> capability 映射
+orchestrator.py = 主 Agent 调度层，负责频道权限、统一上下文和能力分发
 coros_capability.py = 把 coros-report 包装成第一个 capability
 auto_report.py = coros-report 专属业务逻辑，负责查新运动和生成报告
 scheduler.py = 通用触发器，负责什么时候执行
-discord_bot.py = 交互入口，只负责接收消息并交给 registry
+discord_bot.py = 交互入口，只负责接收消息并交给 orchestrator
 kitchen_capability.py = kitchen-assistant 的命令入口
 pantry.py = 菜谱、采购清单、库存、保质期和今日推荐逻辑
 ```
@@ -265,7 +268,7 @@ COROS_AUTO_REPORT_SEND_ON_FIRST_RUN
 
 自动模式不需要用户发送命令，只要 bot 持续运行，就会按间隔自动检查。
 
-### 3.8 主框架 Capability / Registry / Router 重构
+### 3.8 主框架 Capability / Registry / Orchestrator 重构
 
 为了让 `myMinions` 更接近 OpenClaw / Codex 这类“主运行时 + 能力扩展”的结构，项目加入了 capability 注册机制。
 
@@ -279,8 +282,9 @@ Discord bot
 
 现在：
 Discord bot
--> registry
--> coros-report capability
+-> MainAgentOrchestrator
+-> CapabilityRegistry
+-> coros-report / kitchen-assistant capability
 -> 对应 command handler
 ```
 
@@ -288,17 +292,45 @@ Discord bot
 
 ```text
 src/runtime/capability.py
-= 定义 Capability、TextCommand、CommandContext
+= 定义 Capability、TextCommand、CommandContext，并支持 capability 声明所属频道环境变量
 
 src/registry.py
-= 加载所有 capabilities，注册命令，分发文本消息
+= 加载所有 capabilities，注册命令，并维护 command -> capability 的映射
+
+src/orchestrator.py
+= 主 Agent 调度层，负责频道权限判断、统一 CommandContext、文本消息分发和 startup handler 执行
 ```
 
 `coros-report` 被包装成第一个 capability：
 
 ```text
-coros-report/agent/coros_capability.py
+agents/coros-report/agent/coros_capability.py
 = 注册 coros-report 的命令和启动任务
+```
+
+`kitchen-assistant` 被包装成第二个平行 capability：
+
+```text
+agents/kitchen-assistant/agent/kitchen_capability.py
+= 注册 kitchen-assistant 的命令入口
+```
+
+当前执行链路是：
+
+```text
+Discord slash / ! 文本消息
+-> discord_bot.py
+-> MainAgentOrchestrator
+-> CapabilityRegistry
+-> coros-report 或 kitchen-assistant
+-> 返回 Discord
+```
+
+频道权限从 `discord_bot.py` 中抽离，改为由 capability 自己声明：
+
+```text
+coros-report -> DISCORD_RUNNING_CHANNEL_ID
+kitchen-assistant -> DISCORD_COOKING_CHANNEL_ID
 ```
 
 当前 `coros-report` capability 注册了这些文本命令：
@@ -322,7 +354,7 @@ coros-report/agent/coros_capability.py
 
 用于查看当前加载的能力包。
 
-这次重构后，`coros-report` 不再是整个系统本身，而是 `myMinions` 主框架里的第一个能力包。未来新增 `museum-guide`、`calendar-agent`、`study-agent` 等能力时，可以按同样方式新增 capability，而不是继续把逻辑堆进 `discord_bot.py`。
+这次重构后，`coros-report` 不再是整个系统本身，而是 `myMinions` 主框架里的第一个能力包；`kitchen-assistant` 是第二个平行能力包。未来新增 `museum-guide`、`calendar-agent`、`study-agent` 等能力时，可以按同样方式新增 capability，由主 Agent 统一调度，而不是继续把逻辑堆进 `discord_bot.py`。
 
 ### 3.9 Python 项目迁移到 uv
 
@@ -353,7 +385,206 @@ uv run python scripts/ingest_books.py
 
 原来的 `.venv` 使用方式仍然可以保留，但后续本地和 VPS 更推荐用 `uv sync` 和 `uv run`。
 
-### 3.10 kitchen-assistant 厨房采购能力
+### 3.10 coros-report 引入 LangGraph 工作流
+
+为了让运动报告不再只是一个“大函数”直接生成，`coros-report` 内部被改造成 LangGraph StateGraph 工作流。
+
+这次改造没有改变外部交互方式。用户仍然通过：
+
+```text
+!coros 我想看一下今天的训练分析
+/coros
+```
+
+触发运动报告。变化发生在 `coros-report` 内部：
+
+```text
+之前：
+coros_capability.py
+-> agent.py generate_coros_report()
+-> 一次性完成工具规划、COROS 数据获取和报告生成
+
+现在：
+coros_capability.py
+-> graph.py generate_coros_graph_report()
+-> LangGraph 分节点执行
+-> agent.py 提供具体 COROS 和 LLM 业务函数
+```
+
+新增文件：
+
+```text
+agents/coros-report/agent/graph.py
+= 定义 CorosGraphState、LangGraph 节点、条件边和 generate_coros_graph_report()
+```
+
+`agent.py` 被拆分为更细的业务函数，供 LangGraph 节点调用：
+
+```text
+plan_coros_tools()
+= 根据用户请求和 COROS MCP 工具列表规划工具调用
+
+fetch_coros_results()
+= 执行 COROS MCP 工具调用并收集结果
+
+render_coros_report()
+= 基于 COROS 结果、memory 和 prompt 生成报告
+
+generate_coros_report()
+= 保留旧入口，方便回退或复用
+```
+
+当前 LangGraph 节点流程：
+
+```text
+START
+-> route_request
+-> plan_tools
+-> fetch_data
+-> generate_report
+-> critic_review
+-> 条件分支：
+   review_passed = true  -> final_report
+   review_passed = false -> revise_report -> final_report
+-> END
+```
+
+其中：
+
+```text
+route_request
+= 当前先固定为 workout_report，后续可升级为自然语言意图识别
+
+plan_tools
+= 调用 agent.py 中的 plan_coros_tools()
+
+fetch_data
+= 调用 agent.py 中的 fetch_coros_results()
+
+generate_report
+= 调用 agent.py 中的 render_coros_report()
+
+critic_review
+= 使用 LLM 检查报告是否编造数据、泄露内部 ID / 坐标 / FIT、给出医疗诊断或缺少固定结构
+
+revise_report
+= 如果审查不通过，使用 LLM 根据审查意见修订报告
+
+final_report
+= 返回最终报告
+```
+
+这次升级的核心价值是：
+
+```text
+可观察：每一步都有明确 state 字段，例如 tool_calls、tool_results、draft_report、review_notes、final_report
+可扩展：后续可以插入天气、主观感受、RAG、周训练负荷等节点
+可分支：例如室内跑跳过天气节点，户外跑进入天气分析节点
+可评测：可以分别评测工具规划、数据获取、报告初稿、审查结果和最终报告
+更可靠：增加 critic_review / revise_report，形成基础 Reflection 链路
+```
+
+当前需要注意的是：LangGraph 只改变了 `coros-report` 的内部工作流；自然语言自动唤起能力由 `src/orchestrator.py` 中的主 Agent 路由层处理。
+
+### 3.11 主 Agent 自然语言路由
+
+为了让交互不再完全依赖 `!coros`、`!kitchen` 这类显式命令，`src/orchestrator.py` 新增了 LLM 自然语言路由。
+
+原来的触发方式：
+
+```text
+!coros 我想看一下今天的训练分析
+!kitchen bought 鸡腿 1000g
+```
+
+现在也支持在对应频道中直接发送：
+
+```text
+我想看一下今天的训练分析
+轻松跑应该怎么判断强度
+今天腿很沉，RPE 7
+我今天买了鸡腿 1000g
+今天有什么快过期的食材
+今天能做什么菜
+https://www.bilibili.com/video/BV...
+```
+
+主 Agent 会把这些自然语言转成内部命令：
+
+```text
+我想看一下今天的训练分析
+-> coros
+
+轻松跑应该怎么判断强度
+-> running
+
+今天腿很沉，RPE 7
+-> feel
+
+我今天买了鸡腿 1000g
+-> kitchen bought 鸡腿 1000g
+
+今天有什么快过期的食材
+-> kitchen expiring
+
+今天能做什么菜
+-> kitchen today
+
+B站链接 / BV号
+-> kitchen add <video>
+```
+
+当前策略是 LLM 结构化路由。主 Agent 会把当前频道允许的命令和用户原话发给 DeepSeek，让模型返回：
+
+```json
+{
+  "command": "coros",
+  "argument": "我想看一下今天的训练分析",
+  "confidence": 0.91,
+  "reason": "用户想看训练分析"
+}
+```
+
+系统不会直接相信模型输出，而是继续做四层校验：
+
+```text
+command 必须在当前频道 allowed_commands 里
+confidence 必须高于阈值
+kitchen 参数必须符合内部 action 格式
+command = none 时不触发任何能力
+```
+
+路由仍然遵守频道限制：
+
+```text
+running 频道
+-> 只触发 coros-report / running / feel / feelings
+
+cooking 频道
+-> 只触发 kitchen-assistant
+```
+
+因此在 cooking 频道说“我想看今天训练分析”不会触发运动报告；在 running 频道说“我今天买了鸡腿 1000g”也不会触发厨房入库。
+
+新增开关：
+
+```env
+NATURAL_LANGUAGE_ROUTING_ENABLED=true
+```
+
+如果需要临时关闭自然语言路由，可以设置：
+
+```env
+NATURAL_LANGUAGE_ROUTING_ENABLED=false
+```
+
+还可以调整 LLM 路由置信度阈值：
+
+```env
+NATURAL_LANGUAGE_ROUTING_CONFIDENCE=0.7
+```
+
+### 3.12 kitchen-assistant 厨房采购能力
 
 项目新增第二个 capability：`kitchen-assistant`。它和 `coros-report` 平行，不是写进 `coros-report` 里的子功能。
 
@@ -417,6 +648,86 @@ uv run python scripts/ingest_books.py
 /kitchen-pantry
 /kitchen-expiring
 /kitchen-today
+```
+
+### 3.13 Agent 评估体系
+
+为了避免“先射箭再画靶”，项目将原来的简单回归测试升级为更标准的 eval 结构：先定义评估目标、指标和阈值，再用 golden dataset 和 judge 执行评分。
+
+```text
+evals/
+├── specs/       # 评估目标、指标、阈值
+├── datasets/    # golden cases 和反例
+├── fixtures/    # 后续外部输入样本
+├── judges/      # 评分器
+├── traces/      # 后续 Agent 执行轨迹
+├── README.md
+└── run_evals.py
+```
+
+当前第一批标准 eval 是 `natural_language_routing`：
+
+```text
+spec:
+evals/specs/natural_language_routing.json
+
+dataset:
+evals/datasets/natural_language_routing.json
+
+judge:
+evals/judges/natural_language_routing.py
+```
+
+它覆盖主 Agent 自然语言路由，不真实调用 DeepSeek、Discord、COROS 或 B站服务，而是用固定的 LLM 输出样本测试主 Agent 的后处理和安全校验。
+
+当前指标和阈值：
+
+```text
+route_accuracy >= 0.90
+rejection_accuracy >= 1.00
+cross_channel_rejection >= 1.00
+low_confidence_rejection >= 1.00
+invalid_argument_rejection >= 1.00
+```
+
+测试样例覆盖：
+
+```text
+running 频道允许 coros / running / feel / feelings
+cooking 频道只允许 kitchen
+LLM 返回跨频道 command 时会被拒绝
+LLM 返回 confidence 低于阈值时会被拒绝
+LLM 返回 kitchen 参数格式不完整时会被拒绝
+典型自然语言能映射到预期内部命令
+```
+
+运行方式：
+
+```bash
+uv run python evals/run_evals.py
+```
+
+当前结果：
+
+```text
+Suite: natural_language_routing
+Cases: 13/13 passed
+- route_accuracy: 1.00 >= 0.90 PASS
+- rejection_accuracy: 1.00 >= 1.00 PASS
+- cross_channel_rejection: 1.00 >= 1.00 PASS
+- low_confidence_rejection: 1.00 >= 1.00 PASS
+- invalid_argument_rejection: 1.00 >= 1.00 PASS
+```
+
+这套评估目前属于离线、确定性 eval，重点验证主 Agent 的路由安全边界和稳定性。后续可以继续增加：
+
+```text
+COROS LangGraph 节点评估
+COROS 报告结构评估
+critic_review 是否能发现不合格报告
+RAG 检索命中率评估
+kitchen 字幕提取 JSON 质量评估
+真实 LLM 路由 golden cases
 ```
 
 `kitchen-bought` 最初需要输入食材、数量、保存方式、保质期。后续为了降低使用成本，改成只输入：
@@ -720,21 +1031,31 @@ check_and_send_coros_auto_report
 
 ```text
 新增 src/runtime/capability.py 定义 capability 标准结构
-新增 src/registry.py 统一注册和路由 capabilities
-新增 coros-report/agent/coros_capability.py 包装 coros-report
-Discord bot 只调用 registry，不再直接依赖 coros-report 的具体实现
+新增 src/registry.py 统一注册 capabilities，并维护 command -> capability 映射
+新增 src/orchestrator.py 作为主 Agent 调度层
+新增 agents/coros-report/agent/coros_capability.py 包装 coros-report
+新增 agents/kitchen-assistant/agent/kitchen_capability.py 包装 kitchen-assistant
+Discord bot 只调用 orchestrator，不再直接依赖具体业务实现
 ```
 
 调整后架构变为：
 
 ```text
 Discord bot
--> registry
+-> MainAgentOrchestrator
+-> CapabilityRegistry
 -> capability
 -> agent-specific handlers
 ```
 
-这让 `myMinions` 从单一业务 Agent 应用，升级成一个可以继续扩展多个能力包的小型 Agent 平台。
+其中频道权限从 Discord 层抽出，变成 capability 自己声明所属频道：
+
+```text
+coros-report -> DISCORD_RUNNING_CHANNEL_ID
+kitchen-assistant -> DISCORD_COOKING_CHANNEL_ID
+```
+
+这让 `myMinions` 从单一业务 Agent 应用，升级成一个可以继续扩展多个能力包、并由主 Agent 统一调度的小型 Agent 平台。
 
 ### 问题 14：B站字幕工具安装后找不到 MCP 模块
 
@@ -778,14 +1099,14 @@ Error: Credential config not found. Run `bilibili-subtitle-fetch init` first.
 
 ```text
 在 subtitle_fetcher.py 中固定传入 --config
-默认读取 kitchen-assistant/config.toml
+默认读取 agents/kitchen-assistant/config.toml
 同时支持 BILIBILI_SUBTITLE_CONFIG 环境变量覆盖
 ```
 
 并在 `.gitignore` 中忽略：
 
 ```text
-kitchen-assistant/config.toml
+agents/kitchen-assistant/config.toml
 ```
 
 避免把 B站 Cookie 上传到 GitHub。
@@ -903,6 +1224,99 @@ distanceKm=10.01
 sportType=101
 ```
 
+### 问题 20：切换 LangGraph 后 graph.py 找不到 agent.py 中的函数
+
+在将 `coros-report` 切换为 LangGraph 后，启动时出现：
+
+```text
+ImportError: cannot import name 'fetch_coros_results' from 'agent'
+```
+
+原因是 `graph.py` 已经开始按节点导入：
+
+```text
+fetch_coros_results
+plan_coros_tools
+render_coros_report
+```
+
+但 `agent.py` 仍然只有旧的 `generate_coros_report()` 大函数，没有拆出这些节点可复用的业务函数。
+
+解决方案：
+
+```text
+将 agent.py 中的一体化流程拆成三个函数：
+- plan_coros_tools()
+- fetch_coros_results()
+- render_coros_report()
+
+保留 generate_coros_report() 作为兼容入口
+让 graph.py 调用拆分后的函数
+让 coros_capability.py 调用 generate_coros_graph_report()
+```
+
+修复后验证通过：
+
+```bash
+uv run python -m compileall src agents/coros-report/agent agents/kitchen-assistant/agent
+uv run python -c "import src.main; print('main import ok')"
+```
+
+### 问题 21：主 Agent 只能靠命令触发，不能理解自然语言
+
+在引入 `MainAgentOrchestrator` 后，主 Agent 已经可以统一调度不同 capability，但用户仍然需要显式发送：
+
+```text
+!coros 我想看一下今天的训练分析
+!kitchen bought 鸡腿 1000g
+```
+
+如果直接发送：
+
+```text
+我想看一下今天的训练分析
+我今天买了鸡腿 1000g
+```
+
+系统不会自动唤起对应能力。
+
+解决方案：
+
+```text
+在 src/orchestrator.py 中新增自然语言路由
+使用 DeepSeek 输出结构化 JSON intent
+running 频道只允许路由到 coros-report 相关命令
+cooking 频道只允许路由到 kitchen-assistant
+支持 NATURAL_LANGUAGE_ROUTING_ENABLED 开关
+支持 NATURAL_LANGUAGE_ROUTING_CONFIDENCE 置信度阈值
+```
+
+第一版支持：
+
+```text
+训练分析 / 运动报告 / 配速 / 心率 / 恢复 -> coros
+轻松跑 / 阈值 / 间歇 / 训练方法问题 -> running
+RPE / 腿沉 / 疲劳 / 酸痛 -> feel
+B站链接 / BV号 -> kitchen add
+买了食材和数量 -> kitchen bought
+用了食材和数量 -> kitchen use
+快过期 / 保质期 -> kitchen expiring
+采购清单 / 购物清单 -> kitchen shopping
+库存 / 冰箱 -> kitchen pantry
+今天做什么菜 -> kitchen today
+```
+
+为了降低 LLM 误路由风险，主 Agent 增加了白名单校验：
+
+```text
+LLM 返回 command = coros，但当前是 cooking 频道 -> 拒绝
+LLM 返回 command = kitchen，但当前是 running 频道 -> 拒绝
+LLM 返回 confidence 低于阈值 -> 拒绝
+LLM 返回 kitchen bought 但没有食材或数量 -> 拒绝
+```
+
+这样自然语言路由由 LLM 负责理解语义，但最终执行仍由主 Agent 控制。
+
 ## 5. 当前项目能力总结
 
 当前 `coros-report` 已经具备：
@@ -923,7 +1337,12 @@ sportType=101
 支持 scheduler 定时触发
 支持 latest_reported_activity_id 防重复推送
 支持 capability 注册机制
-支持 registry 命令路由
+支持 registry 命令映射
+支持 MainAgentOrchestrator 主控调度
+支持主 Agent 自然语言路由
+支持 evals/specs/datasets/judges 标准评估结构
+支持 LangGraph StateGraph 内部工作流
+支持 critic_review / revise_report 基础 Reflection 链路
 支持查看已加载能力包
 ```
 
@@ -942,9 +1361,10 @@ sportType=101
 查看快过期食材
 根据库存推荐今天可以做什么
 限制只在 cooking 频道响应
+支持主 Agent 自然语言路由触发常用厨房操作
 ```
 
-这已经不只是一个 prompt 问答机器人，而是一个具备外部数据接入、工具调用、知识库检索、长期配置、远程交互入口、自动触发能力、采购库存状态管理和 capability 扩展机制的个人 Agent 平台雏形。
+这已经不只是一个 prompt 问答机器人，而是一个具备主 Agent 调度层、自然语言路由、LangGraph 工作流、标准评估体系、外部数据接入、工具调用、知识库检索、长期配置、远程交互入口、自动触发能力、采购库存状态管理和 capability 扩展机制的个人 Agent 平台雏形。
 
 ## 6. 后续可继续扩展方向
 
@@ -993,5 +1413,5 @@ museum-education
 可以在简历中写成：
 
 ```text
-设计并实现个人多 Agent 平台 myMinions，基于 Python 构建可复用运行时层和 capability 注册机制，支持 Discord 交互、LLM 调用、MCP 工具接入、长期记忆、RAG 知识库问答、定时任务触发和多频道命令路由。首个 capability coros-report 接入 COROS 运动数据，通过 DeepSeek 生成个性化训练报告，支持自动检测新运动并推送到 Discord；同时基于跑步书籍 PDF 构建 embedding 检索知识库，实现中文训练问答和运动主观感受记录。第二个 capability kitchen-assistant 接入 B站字幕抓取工具，从做菜视频中提取菜谱，支持菜谱库、选择菜谱加入采购清单、采购入库、自动保质期估算、库存消耗、快过期提醒和基于库存的做菜推荐。项目中解决了 MCP 授权地址匹配、Discord 频道权限控制、RAG 中文检索、embedding 批量限制、模型索引一致性、自动报告防重复推送、COROS MCP 文本格式解析、B站字幕工具版本兼容、Cookie 安全配置和多能力路由扩展等问题。
+设计并实现个人多 Agent 平台 myMinions，基于 Python 构建 MainAgentOrchestrator 主控调度层、可复用运行时层和 capability 注册机制，支持 Discord 交互、自然语言意图路由、LLM 调用、MCP 工具接入、长期记忆、RAG 知识库问答、定时任务触发和多频道能力路由。首个 capability coros-report 接入 COROS 运动数据，并引入 LangGraph StateGraph 将工具规划、数据获取、报告生成、质量审查和修订输出拆成可观测工作流，通过 DeepSeek 生成个性化训练报告，支持自动检测新运动并推送到 Discord；同时基于跑步书籍 PDF 构建 embedding 检索知识库，实现中文训练问答和运动主观感受记录。第二个 capability kitchen-assistant 接入 B站字幕抓取工具，从做菜视频中提取菜谱，支持菜谱库、选择菜谱加入采购清单、采购入库、自动保质期估算、库存消耗、快过期提醒和基于库存的做菜推荐。项目搭建 evals 标准评估结构，以 spec 定义目标和阈值，dataset 固化 golden cases，judge 评估主 Agent 自然语言路由、跨频道拒绝、置信度阈值和工具参数校验。项目中解决了 MCP 授权地址匹配、Discord 频道权限控制、RAG 中文检索、embedding 批量限制、模型索引一致性、自动报告防重复推送、COROS MCP 文本格式解析、B站字幕工具版本兼容、Cookie 安全配置、多能力路由扩展、LangGraph 节点拆分和自然语言误路由等问题。
 ```

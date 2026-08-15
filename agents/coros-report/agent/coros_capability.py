@@ -1,4 +1,5 @@
-from agent import generate_coros_report, list_available_coros_tools
+from agent import list_available_coros_tools
+from graph import generate_coros_graph_report
 from auto_report import check_and_send_coros_auto_report, register_coros_auto_report
 from feelings import list_recent_feelings, record_feeling
 from knowledge import answer_running_question
@@ -12,7 +13,7 @@ async def _coros_report(context: CommandContext, argument: str) -> None:
     request = argument.strip() or DEFAULT_REPORT_REQUEST
     await context.send("正在读取 COROS 数据并生成报告...")
     try:
-        report = await generate_coros_report(request)
+        report = await generate_coros_graph_report(request)
         await context.send_chunks(report)
     except Exception as exc:
         await context.send(f"生成 COROS 报告失败：{exc}")
@@ -97,8 +98,12 @@ def build_coros_capability() -> Capability:
                 _list_feelings,
                 aliases=("feeling-list",),
             ),
-            TextCommand("coros-auto-check", "手动检查是否有新的 COROS 运动", _auto_check),
-            TextCommand("coros-auto-report", "强制对最新一条 COROS 运动生成报告", _auto_report),
+            TextCommand(
+                "coros-auto-check", "手动检查是否有新的 COROS 运动", _auto_check
+            ),
+            TextCommand(
+                "coros-auto-report", "强制对最新一条 COROS 运动生成报告", _auto_report
+            ),
         ),
         startup_handlers=(register_coros_auto_report,),
     )

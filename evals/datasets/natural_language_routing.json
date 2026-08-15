@@ -1,0 +1,195 @@
+[
+  {
+    "id": "running_report_basic",
+    "channel": "running",
+    "message": "我想看一下今天的训练分析",
+    "llm_response": {
+      "command": "coros",
+      "argument": "我想看一下今天的训练分析",
+      "confidence": 0.94,
+      "reason": "用户请求训练分析"
+    },
+    "expected_route": {
+      "command": "coros",
+      "argument": "我想看一下今天的训练分析"
+    },
+    "tags": ["positive", "running", "coros"]
+  },
+  {
+    "id": "running_book_question",
+    "channel": "running",
+    "message": "轻松跑应该怎么判断强度",
+    "llm_response": {
+      "command": "running",
+      "argument": "轻松跑应该怎么判断强度",
+      "confidence": 0.9,
+      "reason": "用户询问跑步训练方法"
+    },
+    "expected_route": {
+      "command": "running",
+      "argument": "轻松跑应该怎么判断强度"
+    },
+    "tags": ["positive", "running", "rag"]
+  },
+  {
+    "id": "running_feeling_note",
+    "channel": "running",
+    "message": "今天腿很沉，RPE 7，左膝有点紧",
+    "llm_response": {
+      "command": "feel",
+      "argument": "今天腿很沉，RPE 7，左膝有点紧",
+      "confidence": 0.92,
+      "reason": "用户记录运动主观感受"
+    },
+    "expected_route": {
+      "command": "feel",
+      "argument": "今天腿很沉，RPE 7，左膝有点紧"
+    },
+    "tags": ["positive", "running", "feeling"]
+  },
+  {
+    "id": "running_feelings_list",
+    "channel": "running",
+    "message": "查看最近的运动感受记录",
+    "llm_response": {
+      "command": "feelings",
+      "argument": "",
+      "confidence": 0.87,
+      "reason": "用户想查看感受记录"
+    },
+    "expected_route": {
+      "command": "feelings",
+      "argument": ""
+    },
+    "tags": ["positive", "running", "feelings"]
+  },
+  {
+    "id": "kitchen_purchase_basic",
+    "channel": "cooking",
+    "message": "我今天买了鸡腿 1000g",
+    "llm_response": {
+      "command": "kitchen",
+      "argument": "bought 鸡腿 1000g",
+      "confidence": 0.93,
+      "reason": "用户记录采购食材"
+    },
+    "expected_route": {
+      "command": "kitchen",
+      "argument": "bought 鸡腿 1000g"
+    },
+    "tags": ["positive", "cooking", "purchase"]
+  },
+  {
+    "id": "kitchen_use_item",
+    "channel": "cooking",
+    "message": "今天用了鸡腿 500g",
+    "llm_response": {
+      "command": "kitchen",
+      "argument": "use 鸡腿 500g",
+      "confidence": 0.91,
+      "reason": "用户记录食材消耗"
+    },
+    "expected_route": {
+      "command": "kitchen",
+      "argument": "use 鸡腿 500g"
+    },
+    "tags": ["positive", "cooking", "use"]
+  },
+  {
+    "id": "kitchen_expiring",
+    "channel": "cooking",
+    "message": "今天有什么快过期的食材",
+    "llm_response": {
+      "command": "kitchen",
+      "argument": "expiring",
+      "confidence": 0.88,
+      "reason": "用户查询临期食材"
+    },
+    "expected_route": {
+      "command": "kitchen",
+      "argument": "expiring"
+    },
+    "tags": ["positive", "cooking", "expiring"]
+  },
+  {
+    "id": "kitchen_bilibili_add",
+    "channel": "cooking",
+    "message": "这个视频我想保存成菜谱 https://www.bilibili.com/video/BV1Nse7zfE4x/",
+    "llm_response": {
+      "command": "kitchen",
+      "argument": "add https://www.bilibili.com/video/BV1Nse7zfE4x/",
+      "confidence": 0.95,
+      "reason": "用户提供 B站链接保存菜谱"
+    },
+    "expected_route": {
+      "command": "kitchen",
+      "argument": "add https://www.bilibili.com/video/BV1Nse7zfE4x/"
+    },
+    "tags": ["positive", "cooking", "recipe"]
+  },
+  {
+    "id": "reject_cross_channel_coros_in_cooking",
+    "channel": "cooking",
+    "message": "我想看一下今天的训练分析",
+    "llm_response": {
+      "command": "coros",
+      "argument": "我想看一下今天的训练分析",
+      "confidence": 0.95,
+      "reason": "用户请求训练分析"
+    },
+    "expected_route": null,
+    "tags": ["negative", "cross_channel"]
+  },
+  {
+    "id": "reject_cross_channel_kitchen_in_running",
+    "channel": "running",
+    "message": "我今天买了鸡腿 1000g",
+    "llm_response": {
+      "command": "kitchen",
+      "argument": "bought 鸡腿 1000g",
+      "confidence": 0.95,
+      "reason": "用户记录采购食材"
+    },
+    "expected_route": null,
+    "tags": ["negative", "cross_channel"]
+  },
+  {
+    "id": "reject_low_confidence",
+    "channel": "running",
+    "message": "看看这个",
+    "llm_response": {
+      "command": "coros",
+      "argument": "看看这个",
+      "confidence": 0.42,
+      "reason": "用户意图不明确"
+    },
+    "expected_route": null,
+    "tags": ["negative", "low_confidence"]
+  },
+  {
+    "id": "reject_none_chat",
+    "channel": "running",
+    "message": "hello",
+    "llm_response": {
+      "command": "none",
+      "argument": "",
+      "confidence": 0.98,
+      "reason": "用户只是打招呼"
+    },
+    "expected_route": null,
+    "tags": ["negative", "none"]
+  },
+  {
+    "id": "reject_invalid_kitchen_argument",
+    "channel": "cooking",
+    "message": "我买了点东西",
+    "llm_response": {
+      "command": "kitchen",
+      "argument": "bought",
+      "confidence": 0.91,
+      "reason": "缺少食材和数量"
+    },
+    "expected_route": null,
+    "tags": ["negative", "invalid_argument"]
+  }
+]

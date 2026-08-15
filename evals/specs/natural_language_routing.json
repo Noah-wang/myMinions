@@ -1,0 +1,37 @@
+{
+  "name": "natural_language_routing",
+  "version": "1.0.0",
+  "objective": "Evaluate whether MainAgentOrchestrator safely converts natural language messages into allowed internal commands.",
+  "unit_under_test": "src.orchestrator.MainAgentOrchestrator",
+  "dataset": "evals/datasets/natural_language_routing.json",
+  "judge": "evals/judges/natural_language_routing.py",
+  "metrics": {
+    "route_accuracy": {
+      "description": "Positive examples routed to the expected command and argument.",
+      "threshold": 0.9
+    },
+    "rejection_accuracy": {
+      "description": "Negative examples rejected with no route.",
+      "threshold": 1.0
+    },
+    "cross_channel_rejection": {
+      "description": "LLM responses that pick a command unavailable in the current Discord channel are rejected.",
+      "threshold": 1.0
+    },
+    "low_confidence_rejection": {
+      "description": "LLM responses below NATURAL_LANGUAGE_ROUTING_CONFIDENCE are rejected.",
+      "threshold": 1.0
+    },
+    "invalid_argument_rejection": {
+      "description": "Malformed kitchen action arguments are rejected.",
+      "threshold": 1.0
+    }
+  },
+  "constraints": [
+    "Do not call DeepSeek during this offline eval.",
+    "Do not call Discord, COROS MCP, Bilibili, or the filesystem data stores.",
+    "Evaluate the router post-processing and safety gates using fixed LLM route outputs.",
+    "Running channel may only route to coros, running, feel, or feelings.",
+    "Cooking channel may only route to kitchen."
+  ]
+}

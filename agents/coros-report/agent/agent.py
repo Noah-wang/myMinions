@@ -51,11 +51,12 @@ Available COROS MCP tools:
 	return clean_calls
 
 
-async def generate_coros_report(user_request: str) -> str:
-	memory = format_memory_for_prompt("coros-report")
+async def plan_coros_tools(user_request: str) -> list[dict[str, Any]]:
 	tools = await list_coros_tools()
-	tool_calls = await _plan_tool_calls(user_request, tools)
+	return await _plan_tool_calls(user_request, tools)
 
+
+async def fetch_coros_results(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
 	results: list[dict[str, Any]] = []
 	for call in tool_calls:
 		try:
@@ -63,13 +64,20 @@ async def generate_coros_report(user_request: str) -> str:
 			results.append({"tool": call, "ok": True, "result": result})
 		except Exception as exc:
 			results.append({"tool": call, "ok": False, "error": str(exc)})
+	return results
 
+
+async def render_coros_report(
+	user_request: str,
+	results: list[dict[str, Any]],
+) -> str:
 	if not results:
 		return (
 			"我已经连上 COROS MCP，但还没有找到可以无参数读取运动数据的工具。"
 			"你可以先发送 `!coros-tools` 查看工具列表，然后我们再调整工具选择逻辑。"
 		)
 
+	memory = format_memory_for_prompt("coros-report")
 	return await complete_text(
 		REPORT_SYSTEM_PROMPT,
 		f"""
@@ -85,6 +93,12 @@ COROS tool calls and results:
 Generate the workout report from the available COROS data.
 """.strip(),
 	)
+
+
+async def generate_coros_report(user_request: str) -> str:
+	tool_calls = await plan_coros_tools(user_request)
+	results = await fetch_coros_results(tool_calls)
+	return await render_coros_report(user_request, results)
 
 
 async def list_available_coros_tools() -> str:
