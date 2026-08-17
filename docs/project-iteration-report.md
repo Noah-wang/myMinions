@@ -6,7 +6,7 @@
 
 后续项目方向逐渐明确为：构建一个属于自己的多 Agent 平台 `myMinions`，先实现运动分析能力 `coros-report`，再扩展厨房采购能力 `kitchen-assistant`。
 
-`coros-report` 的目标是接入 COROS 官方运动数据，通过大模型生成个性化运动报告，并进一步支持基于跑步书籍的训练问答。
+`coros-report` 的目标是接入 COROS 官方运动数据，通过大模型生成个性化运动报告，并进一步支持基于跑步书籍和跑步长视频字幕的训练问答。
 
 `kitchen-assistant` 的目标是接入 B 站做菜视频字幕，从视频中提取菜谱，保存菜谱库，并支持选择菜谱加入采购清单、记录买回来的库存、提醒快过期食材和推荐今天可以做什么。
 
@@ -34,7 +34,7 @@ myMinions/
 │   └── kitchen-assistant/      # 菜谱、采购清单、库存数据
 ├── docs/                 # 项目级文档
 └── scripts/
-    └── ingest_books.py   # PDF 导入脚本
+    └── ingest_books.py   # PDF / 跑步视频字幕导入脚本
 ```
 
 这个调整解决了一个核心问题：如果以后继续添加新的 Agent，不需要每个 Agent 都重复写 Discord、LLM、记忆、RAG、调度器等基础能力。
@@ -97,6 +97,7 @@ DEEPSEEK_MODEL=deepseek-chat
 /coros
 /coros-tools
 /running-ask
+/running-video
 /feel
 /feelings
 /capabilities
@@ -114,6 +115,7 @@ DEEPSEEK_MODEL=deepseek-chat
 !coros
 !coros-tools
 !running
+!running-video
 !feel
 !feelings
 !capabilities
@@ -138,6 +140,15 @@ DISCORD_COOKING_CHANNEL_ID=1537873359130333184
 
 这样可以避免机器人在其他频道乱响应。运动相关命令只在 running 频道生效，厨房相关命令只在 cooking 频道生效。
 
+后续 Discord 交互层加入错误回传。命令执行、slash command 和普通消息处理出现异常时，不只在终端打印，也会向当前频道发送简短错误信息：
+
+```text
+执行 `running` 失败。
+<错误摘要>
+```
+
+错误消息会截断长度，避免把完整 traceback、环境变量或敏感信息直接发到 Discord。
+
 ### 3.4 记忆模块
 
 项目加入了 `memory.json`，用于保存用户长期偏好和 Agent 专属信息。
@@ -152,6 +163,7 @@ global:
 
 agents:
   coros-report:
+    athlete_profile
     goals
     preferences
     injury_notes
@@ -160,6 +172,33 @@ agents:
 
 这个模块为后续个性化训练建议打基础，例如记录用户目标、伤病、训练偏好、近期状态等。
 
+后续 `running` 问答加入了自动长期记忆抽取。用户在训练问题中明确提供的稳定信息会写入：
+
+```text
+athlete_profile:
+  body_metrics:
+    age
+    height_cm
+    weight_kg
+  current_times:
+    half_marathon
+    marathon
+    five_k
+    ten_k
+  training_context:
+    training_days_per_week
+    weekly_mileage_km
+    recent_long_run_km
+  goals
+  race_notes
+  injury_notes
+  preferences
+```
+
+例如用户说“我现在半马 1:40，全马 4:30”，系统会把半马和全马当前成绩写入 `athlete_profile.current_times`。如果用户补充“全马后半程抽筋、补给不足”，则作为 `race_notes` 保存，方便后续判断全马短板时复用。
+
+为了避免污染记忆，系统只保存用户明确说出的信息，不根据模型猜测写入年龄、身高、体重、成绩、伤病或目标。
+
 ### 3.5 PDF RAG 跑步知识库
 
 用户上传跑步书籍 PDF 后，项目加入 RAG 功能，让 Agent 可以基于书籍回答训练问题。
@@ -167,7 +206,7 @@ agents:
 流程是：
 
 ```text
-PDF
+PDF / 跑步视频字幕
 -> ingest_books.py 切分
 -> chunks.json 保存原文片段
 -> index.json 保存关键词索引
@@ -182,6 +221,51 @@ PDF
 轻松跑怎么安排
 间歇训练怎么做
 ```
+
+后续 RAG 来源从单一 PDF 扩展到 B站跑步长视频字幕：
+
+```text
+!running-video <B站BV号或链接>
+/running-video
+```
+
+新增流程：
+
+```text
+用户发送跑步教学长视频链接
+-> 复用 B站字幕抓取能力
+-> 保存完整字幕到 data/knowledge/coros-report/videos/
+-> 重新执行 ingest_books.py
+-> 将 PDF 和视频字幕统一切分成 chunks
+-> 更新 keyword index / embedding index
+-> 后续 running 问答和训练安排可以检索这些视频知识
+```
+
+这个设计和厨房 Agent 的视频处理不同：厨房 Agent 会从视频字幕中提取菜谱结构；跑步 Agent 不先总结视频，而是把完整字幕保存成“可检索资料”，让 RAG 在制定训练内容时按问题检索相关片段。
+
+RAG 回答会在正文后追加 Markdown 引用块，展示本次检索到的短原文：
+
+```markdown
+## 引用原文
+
+**[1] Daniels Running Training Method.pdf p.12**
+
+> 原文短摘录...
+```
+
+这样 Discord 会显示成带竖线的引用样式，便于区分“Agent 解释”和“知识库原文依据”。
+
+`running` 问答也从“直接回答”升级为“先判断信息是否足够”。当用户给出的问题不足以支持精准判断时，Agent 必须：
+
+```text
+先给临时判断
+说明为什么只是候选解释
+结合 RAG 知识指出可能方向
+追问关键上下文
+避免把缺失信息包装成确定答案
+```
+
+例如用户说“半马 1:40，全马 4:30，想提高全马”，Agent 应识别出全马成绩明显慢于半马能力推算，先把“马拉松专项耐力、补给、配速、长距离、天气、抽筋或伤病”等列为候选瓶颈，再追问当时全马发生了什么、近 8 周跑量、最长跑、年龄、身高体重和目标日期等信息。
 
 ### 3.6 Embedding 向量检索升级
 
@@ -416,6 +500,12 @@ coros_capability.py
 ```text
 agents/coros-report/agent/graph.py
 = 定义 CorosGraphState、LangGraph 节点、条件边和 generate_coros_graph_report()
+
+agents/coros-report/agent/shadowrunner_prompt.py
+= 使用 ShadowRunner 跑者决策框架作为新的运动报告系统提示词
+
+agents/coros-report/agent/tool_planner_prompt.py
+= 单独保存 COROS MCP 工具规划提示词，避免继续依赖旧 prompt.py
 ```
 
 `agent.py` 被拆分为更细的业务函数，供 LangGraph 节点调用：
@@ -433,6 +523,19 @@ render_coros_report()
 generate_coros_report()
 = 保留旧入口，方便回退或复用
 ```
+
+后续报告风格从原来的 `prompt.py` 切换为 ShadowRunner 框架：
+
+```text
+阶段 / 瓶颈
+适用域
+边际收益
+最小可逆实验
+停止条件
+边界说明
+```
+
+旧的 `agents/coros-report/agent/prompt.py` 暂时保留，但报告生成和自动报告不再从它导入 `REPORT_SYSTEM_PROMPT`。
 
 当前 LangGraph 节点流程：
 
@@ -507,6 +610,7 @@ final_report
 今天有什么快过期的食材
 今天能做什么菜
 https://www.bilibili.com/video/BV...
+把这个跑步长视频加入知识库 BVxxxx
 ```
 
 主 Agent 会把这些自然语言转成内部命令：
@@ -532,6 +636,9 @@ https://www.bilibili.com/video/BV...
 
 B站链接 / BV号
 -> kitchen add <video>
+
+把这个跑步长视频加入知识库 BVxxxx
+-> running-video BVxxxx
 ```
 
 当前策略是 LLM 结构化路由。主 Agent 会把当前频道允许的命令和用户原话发给 DeepSeek，让模型返回：
@@ -558,7 +665,7 @@ command = none 时不触发任何能力
 
 ```text
 running 频道
--> 只触发 coros-report / running / feel / feelings
+-> 只触发 coros-report / running / running-video / feel / feelings
 
 cooking 频道
 -> 只触发 kitchen-assistant
@@ -693,11 +800,12 @@ invalid_argument_rejection >= 1.00
 测试样例覆盖：
 
 ```text
-running 频道允许 coros / running / feel / feelings
+running 频道允许 coros / running / running-video / feel / feelings
 cooking 频道只允许 kitchen
 LLM 返回跨频道 command 时会被拒绝
 LLM 返回 confidence 低于阈值时会被拒绝
 LLM 返回 kitchen 参数格式不完整时会被拒绝
+LLM 返回 running-video 但没有 B站链接或 BV号时会被拒绝
 典型自然语言能映射到预期内部命令
 ```
 
@@ -711,7 +819,7 @@ uv run python evals/run_evals.py
 
 ```text
 Suite: natural_language_routing
-Cases: 13/13 passed
+Cases: 15/15 passed
 - route_accuracy: 1.00 >= 0.90 PASS
 - rejection_accuracy: 1.00 >= 1.00 PASS
 - cross_channel_rejection: 1.00 >= 1.00 PASS

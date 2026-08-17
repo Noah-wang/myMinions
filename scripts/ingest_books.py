@@ -18,6 +18,7 @@ from src.runtime.embeddings import embed_texts, embedding_configured, get_embedd
 
 KNOWLEDGE_DIR = ROOT_DIR / "data" / "knowledge" / "coros-report"
 BOOKS_DIR = KNOWLEDGE_DIR / "books"
+VIDEOS_DIR = KNOWLEDGE_DIR / "videos"
 CHUNKS_PATH = KNOWLEDGE_DIR / "chunks.json"
 INDEX_PATH = KNOWLEDGE_DIR / "index.json"
 EMBEDDINGS_PATH = KNOWLEDGE_DIR / "embeddings.json"
@@ -43,6 +44,13 @@ def extract_pdf(path: Path) -> list[dict[str, Any]]:
         if text:
             pages.append({"page": index, "text": text})
     return pages
+
+
+def extract_text_document(path: Path) -> list[dict[str, Any]]:
+    text = normalize_text(path.read_text(encoding="utf-8", errors="replace"))
+    if not text:
+        return []
+    return [{"page": 1, "text": text}]
 
 
 def chunk_page(book_name: str, page: int, text: str) -> list[dict[str, Any]]:
@@ -102,6 +110,7 @@ async def write_embeddings(chunks: list[dict[str, Any]]) -> None:
 def main() -> None:
     load_dotenv(ROOT_DIR / ".env")
     BOOKS_DIR.mkdir(parents=True, exist_ok=True)
+    VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
     KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
 
     chunks: list[dict[str, Any]] = []
@@ -109,6 +118,10 @@ def main() -> None:
         pages = extract_pdf(pdf_path)
         for page in pages:
             chunks.extend(chunk_page(pdf_path.name, page["page"], page["text"]))
+    for text_path in sorted([*VIDEOS_DIR.glob("*.md"), *VIDEOS_DIR.glob("*.txt")]):
+        pages = extract_text_document(text_path)
+        for page in pages:
+            chunks.extend(chunk_page(text_path.name, page["page"], page["text"]))
 
     index = {
         "chunk_count": len(chunks),

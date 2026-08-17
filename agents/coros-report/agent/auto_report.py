@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -6,7 +7,7 @@ from typing import Any
 
 import discord
 
-from prompt import REPORT_SYSTEM_PROMPT
+from shadowrunner_prompt import REPORT_SYSTEM_PROMPT
 from src.integrations.coros_mcp import call_coros_tool
 from src.runtime.llm import complete_text
 from src.runtime.memory import format_memory_for_prompt, get_agent_memory, update_agent_memory
@@ -37,6 +38,31 @@ def _activity_log_summary(activity: dict[str, Any]) -> str:
 
 def _log_auto_report(message: str) -> None:
     print(f"[{_log_timestamp()}] coros-auto-report {message}", flush=True)
+
+
+def _env_int(name: str, default: int, minimum: int = 1) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        return max(int(raw_value), minimum)
+    except ValueError:
+        _log_auto_report(f"invalid_env name={name} value={raw_value!r} using={default}")
+        return default
+
+
+async def _with_timeout(label: str, awaitable: Any, timeout_seconds: int) -> Any:
+    _log_auto_report(f"{label}_start timeout_seconds={timeout_seconds}")
+    try:
+        result = await asyncio.wait_for(awaitable, timeout=timeout_seconds)
+    except TimeoutError as exc:
+        _log_auto_report(f"{label}_timeout timeout_seconds={timeout_seconds}")
+        raise TimeoutError(f"{label} timed out after {timeout_seconds}s") from exc
+    except Exception as exc:
+        _log_auto_report(f"{label}_failed error={exc}")
+        raise
+    _log_auto_report(f"{label}_end")
+    return result
 
 
 def _activity_query_arguments() -> dict[str, Any]:
@@ -152,10 +178,21 @@ def activity_key(activity: dict[str, Any]) -> str:
 
 
 async def latest_coros_activity() -> dict[str, Any] | None:
+    timeout_seconds = _coros_tool_timeout_seconds()
+    arguments = _activity_query_arguments()
     try:
-        payload = await call_coros_tool("querySportRecords", _activity_query_arguments())
-    except Exception:
-        payload = await call_coros_tool("querySportRecords", {})
+        payload = await _with_timeout(
+            "tool_querySportRecords",
+            call_coros_tool("querySportRecords", arguments),
+            timeout_seconds,
+        )
+    except Exception as exc:
+        _log_auto_report(f"tool_querySportRecords_retry_empty_args reason={exc}")
+        payload = await _with_timeout(
+            "tool_querySportRecords_empty_args",
+            call_coros_tool("querySportRecords", {}),
+            timeout_seconds,
+        )
     records = _activity_records(payload)
     if not records:
         return None
@@ -207,7 +244,11 @@ async def generate_auto_activity_report(activity: dict[str, Any]) -> str:
         ("queryTrainingLoadAssessment", {}),
     ]:
         try:
-            result = await call_coros_tool(tool_name, arguments)
+            result = await _with_timeout(
+                f"tool_{tool_name}",
+                call_coros_tool(tool_name, arguments),
+                _coros_tool_timeout_seconds(),
+            )
             tool_results.append(
                 {"tool": {"name": tool_name, "arguments": arguments}, "ok": True, "result": result}
             )
@@ -217,9 +258,11 @@ async def generate_auto_activity_report(activity: dict[str, Any]) -> str:
             )
 
     memory = format_memory_for_prompt(AGENT_NAME)
-    return await complete_text(
-        REPORT_SYSTEM_PROMPT,
-        f"""
+    return await _with_timeout(
+        "llm_report_generation",
+        complete_text(
+            REPORT_SYSTEM_PROMPT,
+            f"""
 User request:
 自动检测到一条新的 COROS 运动。请只分析 selected_latest_activity 对应的这一次运动，并生成运动后报告。
 
@@ -231,6 +274,8 @@ COROS tool calls and results:
 
 Generate the workout report from the available COROS data.
 """.strip(),
+        ),
+        _llm_timeout_seconds(),
     )
 
 
@@ -253,8 +298,19 @@ def _send_on_first_run() -> bool:
 
 
 def _poll_minutes() -> int:
-    value = int(os.getenv("COROS_AUTO_REPORT_POLL_MINUTES", "15"))
-    return max(value, 1)
+    return _env_int("COROS_AUTO_REPORT_POLL_MINUTES", 15)
+
+
+def _check_timeout_seconds() -> int:
+    return _env_int("COROS_AUTO_REPORT_TIMEOUT_SECONDS", 300, minimum=30)
+
+
+def _coros_tool_timeout_seconds() -> int:
+    return _env_int("COROS_MCP_TOOL_TIMEOUT_SECONDS", 75, minimum=10)
+
+
+def _llm_timeout_seconds() -> int:
+    return _env_int("COROS_AUTO_REPORT_LLM_TIMEOUT_SECONDS", 180, minimum=30)
 
 
 def _configured_channel_id() -> int | None:
@@ -300,10 +356,13 @@ async def check_and_send_coros_auto_report(
 
     _job_running = True
     try:
+        _log_auto_report("channel_lookup_start")
         channel = await _report_channel(client)
         if channel is None:
             return "COROS auto report skipped: DISCORD_RUNNING_CHANNEL_ID is invalid."
+        _log_auto_report("channel_lookup_end")
 
+        _log_auto_report("latest_activity_lookup_start")
         activity = await latest_coros_activity()
         if activity is None:
             _log_auto_report("activity_lookup records=0")
@@ -314,20 +373,30 @@ async def check_and_send_coros_auto_report(
         if not force_send and not should_send_activity(activity):
             message = "COROS auto report skipped: no new activity."
             if notify_no_change:
+                _log_auto_report("discord_notify_no_change_start")
                 await channel.send("没有检测到新的 COROS 运动。")
+                _log_auto_report("discord_notify_no_change_end")
             return message
 
         should_send_first = (
             _send_on_first_run() if send_on_first_run is None else send_on_first_run
         )
         if not force_send and not has_reported_activity() and not should_send_first:
+            _log_auto_report("first_run_initialize_latest_activity")
             mark_activity_reported(activity)
             return "COROS auto report initialized with latest activity."
 
+        _log_auto_report("discord_detected_message_start")
         await channel.send("检测到新的 COROS 运动，正在自动生成报告...")
+        _log_auto_report("discord_detected_message_end")
+        _log_auto_report("report_generation_start")
         report = await generate_auto_activity_report(activity)
+        _log_auto_report(f"report_generation_end chars={len(report)}")
+        _log_auto_report("discord_report_send_start")
         await _send_chunks(channel, report)
+        _log_auto_report("discord_report_send_end")
         mark_activity_reported(activity)
+        _log_auto_report("mark_activity_reported")
         return "COROS auto report sent."
     except Exception as exc:
         return f"COROS auto report failed: {exc}"
@@ -337,8 +406,15 @@ async def check_and_send_coros_auto_report(
 
 async def _scheduled_check(client: discord.Client) -> None:
     started_at = datetime.now(UTC)
-    _log_auto_report("check_start")
-    result = await check_and_send_coros_auto_report(client)
+    timeout_seconds = _check_timeout_seconds()
+    _log_auto_report(f"check_start timeout_seconds={timeout_seconds}")
+    try:
+        result = await asyncio.wait_for(
+            check_and_send_coros_auto_report(client),
+            timeout=timeout_seconds,
+        )
+    except TimeoutError:
+        result = f"COROS auto report failed: check timed out after {timeout_seconds}s."
     elapsed = (datetime.now(UTC) - started_at).total_seconds()
     _log_auto_report(f"check_end elapsed={elapsed:.1f}s result={result}")
 

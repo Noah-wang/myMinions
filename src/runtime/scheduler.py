@@ -23,6 +23,7 @@ def add_interval_job(
     minutes: int,
     args: list[Any] | None = None,
     run_immediately: bool = True,
+    max_instances: int = 1,
 ) -> None:
     scheduler = start_scheduler()
     scheduler.add_job(
@@ -32,5 +33,8 @@ def add_interval_job(
         args=args or [],
         id=job_id,
         replace_existing=True,
+        coalesce=True,
+        max_instances=max(max_instances, 1),
+        misfire_grace_time=60,
         next_run_time=datetime.now() if run_immediately else None,
     )

@@ -31,14 +31,24 @@ async def _dispatch_interaction_command(
         )
         return
 
-    await interaction.response.send_message(start_message)
-    if interaction.channel is not None:
-        await orchestrator.dispatch_command(
-            client,
-            interaction.channel,
-            command_name,
-            argument,
-        )
+    try:
+        await interaction.response.send_message(start_message)
+        if interaction.channel is not None:
+            await orchestrator.dispatch_command(
+                client,
+                interaction.channel,
+                command_name,
+                argument,
+            )
+    except Exception as exc:
+        error_text = str(exc).strip() or exc.__class__.__name__
+        if len(error_text) > 500:
+            error_text = f"{error_text[:500].rstrip()}..."
+        message = f"执行 `{command_name}` 失败。\n```text\n{error_text}\n```"
+        if interaction.response.is_done():
+            await interaction.followup.send(message)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
 
 
 # 创建discord客户端
@@ -97,6 +107,19 @@ def create_discord_client() -> discord.Client:
             "running",
             question,
             "收到，开始检索跑步书籍。",
+        )
+
+    @tree.command(name="running-video", description="把 B站跑步长视频导入知识库")
+    @app_commands.describe(video="B站 BV号或视频链接")
+    async def running_video_command(
+        interaction: discord.Interaction, video: str
+    ) -> None:
+        await _dispatch_interaction_command(
+            interaction,
+            client,
+            "running-video",
+            video,
+            "收到，开始导入跑步视频知识。",
         )
 
     @tree.command(name="feel", description="记录一次运动后的主观感受")
@@ -266,11 +289,17 @@ def create_discord_client() -> discord.Client:
         if message.author.bot:
             return
 
-        await get_orchestrator().dispatch_text(
-            client,
-            message.channel,
-            message.content,
-        )
+        try:
+            await get_orchestrator().dispatch_text(
+                client,
+                message.channel,
+                message.content,
+            )
+        except Exception as exc:
+            error_text = str(exc).strip() or exc.__class__.__name__
+            if len(error_text) > 500:
+                error_text = f"{error_text[:500].rstrip()}..."
+            await message.channel.send(f"处理消息失败。\n```text\n{error_text}\n```")
 
     return client
 

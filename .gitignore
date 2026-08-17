@@ -5,4 +5,6 @@ __pycache__/
 .DS_Store
 data/.DS_Store
 agents/kitchen-assistant/config.toml
+agents/coros-report/config.toml
+data/knowledge/coros-report/videos/
 **/.secrets/

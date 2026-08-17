@@ -32,6 +32,38 @@
     "tags": ["positive", "running", "rag"]
   },
   {
+    "id": "running_video_import",
+    "channel": "running",
+    "message": "把这个跑步长视频加入知识库 BV1Nse7zfE4x",
+    "llm_response": {
+      "command": "running-video",
+      "argument": "BV1Nse7zfE4x",
+      "confidence": 0.94,
+      "reason": "用户要导入跑步视频知识"
+    },
+    "expected_route": {
+      "command": "running-video",
+      "argument": "BV1Nse7zfE4x"
+    },
+    "tags": ["positive", "running", "video_import"]
+  },
+  {
+    "id": "running_profile_update",
+    "channel": "running",
+    "message": "我23岁，身高180cm，体重70kg，全马4:30那次后半程抽筋了",
+    "llm_response": {
+      "command": "running",
+      "argument": "我23岁，身高180cm，体重70kg，全马4:30那次后半程抽筋了",
+      "confidence": 0.93,
+      "reason": "用户补充跑步长期档案和比赛问题"
+    },
+    "expected_route": {
+      "command": "running",
+      "argument": "我23岁，身高180cm，体重70kg，全马4:30那次后半程抽筋了"
+    },
+    "tags": ["positive", "running", "profile"]
+  },
+  {
     "id": "running_feeling_note",
     "channel": "running",
     "message": "今天腿很沉，RPE 7，左膝有点紧",

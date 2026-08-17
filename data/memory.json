@@ -9,13 +9,29 @@
       "goals": [],
       "preferences": [],
       "injury_notes": [],
-      "latest_reported_activity_id": "479624756220428391:101:1786737854:1786741430",
+      "latest_reported_activity_id": "479671526264701228:101:1786910728:1786915661",
       "feeling_notes": [],
       "latest_reported_activity": {
-        "labelId": "479624756220428391",
+        "labelId": "479671526264701228",
         "sportType": 101,
-        "startTimestamp": 1786737854,
-        "endTimestamp": 1786741430
+        "startTimestamp": 1786910728,
+        "endTimestamp": 1786915661
+      },
+      "athlete_profile": {
+        "current_times": {
+          "half_marathon": "1:40:00",
+          "marathon": "4:30:00"
+        },
+        "goals": [
+          {
+            "distance": "marathon",
+            "target_time": null,
+            "target_date": null
+          }
+        ],
+        "race_notes": [],
+        "injury_notes": [],
+        "preferences": []
       }
     }
   }

@@ -4,6 +4,7 @@ from auto_report import check_and_send_coros_auto_report, register_coros_auto_re
 from feelings import list_recent_feelings, record_feeling
 from knowledge import answer_running_question
 from src.runtime.capability import Capability, CommandContext, TextCommand
+from video_knowledge import import_running_video_knowledge
 
 
 DEFAULT_REPORT_REQUEST = "分析我最近一次运动，重点看配速、心率、恢复和下一次训练建议。"
@@ -40,6 +41,20 @@ async def _running_ask(context: CommandContext, argument: str) -> None:
         await context.send_chunks(answer)
     except Exception as exc:
         await context.send(f"回答跑步问题失败：{exc}")
+
+
+async def _running_video(context: CommandContext, argument: str) -> None:
+    video_input = argument.strip()
+    if not video_input:
+        await context.send("请提供 B站 BV号或视频链接。")
+        return
+
+    await context.send("正在抓取 B站字幕，并导入跑步知识库...")
+    try:
+        result = await import_running_video_knowledge(video_input)
+        await context.send_chunks(result)
+    except Exception as exc:
+        await context.send(f"导入跑步视频失败：{exc}")
 
 
 async def _record_feeling(context: CommandContext, argument: str) -> None:
@@ -86,6 +101,12 @@ def build_coros_capability() -> Capability:
             TextCommand("coros", "生成 COROS 运动报告", _coros_report),
             TextCommand("coros-tools", "列出 COROS MCP 工具", _coros_tools),
             TextCommand("running", "基于跑步书籍回答训练问题", _running_ask),
+            TextCommand(
+                "running-video",
+                "把 B站跑步长视频字幕导入跑步知识库",
+                _running_video,
+                aliases=("running-import-video",),
+            ),
             TextCommand(
                 "feel",
                 "记录运动后的主观感受",

@@ -55,8 +55,9 @@ async def critic_review(state: CorosGraphState) -> dict[str, object]:
 - 不编造 COROS 没提供的数据
 - 不展示内部 ID、坐标、FIT、设备 ID
 - 不给医疗诊断
-- 必须包含训练结构、关键证据、下一步、置信度
+- 必须包含问题重述、当前判断、数据依据、下一步、边界
 - 下一步必须低风险、可回滚、可验证
+- 必须说明置信度、未知项和停止条件
 
 返回：
 {{

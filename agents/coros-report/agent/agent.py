@@ -4,7 +4,8 @@ from typing import Any
 from src.integrations.coros_mcp import call_coros_tool, compact_json, list_coros_tools
 from src.runtime.llm import complete_json, complete_text
 from src.runtime.memory import format_memory_for_prompt
-from prompt import REPORT_SYSTEM_PROMPT, TOOL_PLANNER_PROMPT
+from shadowrunner_prompt import REPORT_SYSTEM_PROMPT
+from tool_planner_prompt import TOOL_PLANNER_PROMPT
 
 
 def _tool_summary(tools: list[dict[str, Any]]) -> str:
