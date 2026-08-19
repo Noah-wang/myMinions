@@ -881,6 +881,162 @@ data/kitchen-assistant/pantry.json
 
 这个设计保留历史记录，但列表展示时只显示当前有效项。
 
+### 3.14 多轮对话会话历史
+
+在此之前，每一次用户消息都是一次独立的、无历史的 LLM 调用，Agent 只能依赖 `data/memory.json` 里的结构化长期档案。这导致跑步教练追问用户之后，拿到答案却无法把答案和自己刚问过的问题对应起来。
+
+为此新增了通用运行时模块 `src/runtime/conversation.py`：
+
+```text
+按 (conversation_id, topic) 隔离会话
+保留最近 6 轮 user / assistant 消息
+单条消息截断到 1200 字符
+使用 threading.Lock 保护，兼容 Web 的 ThreadingHTTPServer
+提供 get_history / append_turn / last_user_message / clear_history
+```
+
+`src/runtime/llm.py` 的 `complete_text` 增加可选的 `history` 参数，把历史作为真实的多轮 messages 插在 system 和当前问题之间：
+
+```text
+system  -> 角色和输出规则
+user    -> 上一轮用户消息
+assistant -> 上一轮 Agent 回答
+user    -> 本轮用户消息
+```
+
+会话 ID 的来源按入口区分：
+
+```text
+CommandContext 增加 conversation_id 字段
+orchestrator 优先读取 channel 自带的 conversation_id
+Discord 侧回落到 channel:{频道ID}，按频道隔离
+Web 侧由前端 sessionStorage 生成 UUID 随请求发送
+web_server 对 session_id 做白名单过滤并加 web: 前缀
+```
+
+这里 Web 侧必须单独处理，因为 `WebChannel.id` 恒为 `-1`，如果直接用它当会话 ID，所有访问者会共用同一份对话历史。
+
+同时 `answer_running_question` 的知识库检索 query 也做了调整。多轮追问时用户这一轮往往只是「1 每周40公里 2 主要是间歇」这样的裸答案，单独拿它去检索会跑偏，因此在有历史时拼上上一轮用户消息来保留话题。
+
+### 3.15 会话边界与 pending 追问状态
+
+有了会话历史之后，接着要回答一个问题：在 Discord 里，怎么判断一条消息属于上一段对话，还是一段全新的对话。
+
+第一层边界是**频道硬隔离**，这一层项目本来就有，不需要新增代码：
+
+```text
+coros-report 绑定 DISCORD_RUNNING_CHANNEL_ID
+kitchen-assistant 绑定 DISCORD_COOKING_CHANNEL_ID
+做饭频道的自然语言白名单里只有 kitchen，路由不到 running
+conversation_id 本身就是 channel:{频道ID}，历史天然按频道分开
+```
+
+所以跑步的对话不可能出现在做饭频道，反之亦然。
+
+第二层边界是**空闲超时**。原来一个频道等于一段永不结束的对话，只靠 6 轮滑动窗口自然遗忘，隔几天再说话仍然会接上旧上下文。现在会话记录 `updated_at`，读取时发现超过空闲时间就整个丢弃：
+
+```text
+CONVERSATION_IDLE_MINUTES 控制，默认 60 分钟
+过期时 history 和 pending 一起清空
+过期判断发生在读取时，不需要额外的清理定时器
+```
+
+在此基础上加入了 **pending 追问状态**，用来把用户的回答和 Agent 的问题绑定起来。教练回答生成后，从「还需要确认 / 仍需确认」小节里抽出问题列表存进会话；下一条消息进来时：
+
+```text
+orchestrator 发现该会话有 pending -> 跳过自然语言路由，直接投给 running
+knowledge.py 把这批问题原文拼进 prompt，告诉模型用户正在按顺序回答它们
+模型据此走输出模式 B
+新一轮回答重新抽取问题，没有追问就等于清空 pending
+```
+
+跳过自然语言路由这一步同时解决了一个隐患：像「1 每周40公里 2 主要是间歇」这样的裸答案，交给路由器很容易被判成 `none` 或置信度不足而被拒绝，用户会觉得 Agent 突然不理人了。
+
+需要强调的是，pending 捷径不绕过频道权限。它先检查 `is_allowed_for_command(channel_id, "running")`，做饭频道即使有残留 pending 也不会被触发。
+
+### 3.16 Web 控制台重构为对话产品
+
+原来的 Web 页面是三栏「控制台」布局：左侧能力列表和运行时说明，中间对话，右侧执行轨迹和架构图。它把置信度、工具名、LangGraph 节点、内部 capability 名和命令全都摊在页面上，更像一个调试面板而不是产品。顶部还有四个示例按钮，容易让人误以为需要先手动选择 Agent。
+
+实际上 Web 入口早就走的是和 Discord 同一套自然语言路由，用户从来不需要选能力：
+
+```text
+dispatch_web_text -> _route_natural_language_from_allowed -> DeepSeek 输出 intent
+WEB_AGENT_MODE=real 时调用真实 capability
+WEB_AGENT_MODE=demo 时走本地关键词假路由，只用于离线演示
+```
+
+所以这次重构的重点是把这件事表达出来，而不是新增能力：
+
+```text
+三栏改为单栏居中对话，最大宽度 740px
+移除能力列表、运行时面板、执行轨迹、置信度、工具、流程节点和架构图
+顶部四个示例按钮改为空状态下的三个建议，开始对话后消失
+新增「新对话」按钮，重新生成 session_id 并清空记录
+「正在…」这类进度提示改为临时的思考中指示器，不再留在对话记录里
+回答按 Markdown 渲染标题、引用、有序和无序列表
+输入框支持自适应高度、Enter 发送、Shift+Enter 换行
+```
+
+后端也收敛了对外暴露的信息，`/api/capabilities` 不再返回内部能力名、路由提示和命令列表，只保留空状态用的示例问题；Demo 模式的回复文案也从「已路由到 coros-report」这种内部叙述改成正常的用户视角回答。
+
+### 3.17 Discord 等待反馈
+
+Discord 侧一次请求要走自然语言路由、MCP 取数或知识库检索，再加上生成，通常十几秒才有第一条回复，期间界面上完全没有动静，容易让人以为 bot 挂了。
+
+这里先用 Discord 原生的「正在输入」指示器补上等待反馈：
+
+```text
+斜杠命令 -> interaction.channel.typing() 包住 dispatch_command
+自然语言消息 -> message.channel.typing() 包住 dispatch_text
+```
+
+自然语言那条路径加了一个判断，只在能力频道亮指示器。因为 `on_message` 会收到 bot 可见的所有频道的消息，非能力频道 `dispatch_text` 会立刻返回，亮指示器不但没意义，还会让 bot 看起来在到处打字。
+
+需要说明的是，这不是流式输出。Discord 没有流式消息接口，真正的流式只能靠反复 `message.edit()` 模拟，而且受每频道约 5 次 / 5 秒的编辑速率限制和单条 2000 字符上限约束。更前置的问题是 `complete_text` 目前没有开启 `stream=True`，DeepSeek 是一次性返回完整响应，所以现阶段并没有可以流式输出的内容。真流式留作后续。
+
+### 3.18 引入真正的 tool call
+
+项目此前虽然有「工具调用」，但只有 COROS 那一处，而且是手搓的：把 MCP 工具清单塞进 prompt，让模型用 `complete_json` 吐出一个 `tool_calls` 数组，代码再逐个执行。模型侧从来没有用过 `tools` 参数，本质上只是在填 JSON 模板。这种一次性规划有个硬伤：模型必须在看到任何数据之前就决定调什么，拿到结果后没有第二次机会。
+
+这次新增了通用的工具运行时 `src/runtime/tools.py`：
+
+```text
+Tool         = 名称、描述、JSON Schema 参数、处理函数
+ToolRegistry = 注册表，负责生成 schema 和执行调用
+run_tool_loop = 执行循环，模型要工具就执行并把结果喂回去，直到它给出文本回答
+```
+
+`src/runtime/llm.py` 相应增加了 `complete_with_tools`，真正把 `tools` 和 `tool_choice` 传给模型。
+
+有两个设计约束是刻意的：
+
+```text
+轮数上限（默认 4）用尽后，收掉工具再要一次最终回答，避免无限循环
+工具往返只存在于单次调用内部，不写进会话历史
+```
+
+第二条尤其重要。`conversation.py` 的历史只存 user / assistant 两种消息，如果把 `assistant(tool_calls)` 和 `role="tool"` 也存进去，6 轮窗口很快就会被中间过程撑爆，而这些中间过程对下一轮理解用户意图没有价值。
+
+首批接入三个工具，都在 `agents/coros-report/agent/running_tools.py`：
+
+```text
+training_paces        由比赛成绩算 VDOT 和 E/M/T/I/R 配速，并预测其他距离成绩
+race_countdown        返回今天日期，以及距离目标比赛还有多少天和多少周
+save_running_profile  把用户明确说出的长期信息写入跑步档案
+```
+
+选这三个的共同理由是：**模型自己做这些事不可靠**。配速和 VDOT 是纯数学，模型心算经常出错而且错得很隐蔽；模型不知道今天几号，而周期化训练必须知道还剩几周；档案写入原来是每条消息都无条件跑一次 LLM 抽取，哪怕用户只是问「什么是阈值跑」，改成工具后由模型判断有没有东西要存。
+
+`training_paces` 用 Daniels/Gilbert 公式实现，实测与书中表格吻合：
+
+```text
+半马 1:40:00 -> VDOT 45.1（表格 45，对应半马 1:40:20）
+T 配速 4:37/km（表格 4:38）
+I 配速 4:14/km（表格 4:16）
+5k 20:00 -> VDOT 49.8（表格 49.8）
+```
+
 ## 4. 主要问题与解决方案
 
 ### 问题 1：Skill 配置冲突
@@ -1425,6 +1581,66 @@ LLM 返回 kitchen bought 但没有食材或数量 -> 拒绝
 
 这样自然语言路由由 LLM 负责理解语义，但最终执行仍由主 Agent 控制。
 
+### 问题 22：多轮追问后 Agent 不记得自己问过什么
+
+跑步教练在信息不足时会先给临时判断，然后追问 6 个问题。但用户按编号回答之后，Agent 并没有「拿到答案」的反应，而是又输出了一遍临时判断和一批新问题，像是重新开了一段对话。
+
+排查后发现是四个层面叠加造成的：
+
+```text
+knowledge.py 的 answer_running_question 只接收当前这一条消息
+llm.py 的 complete_text 每次只发 system + 单条 user
+orchestrator 的自然语言路由同样无状态，把答案当成全新意图重新路由
+RUNNING_KNOWLEDGE_PROMPT 把「还需要确认」写死成固定输出模板
+```
+
+对模型来说，第二轮输入是一条突然出现的带编号陈述句，它无法知道这是对自己上一轮提问的回答，只能当新问题重新处理。即使补上历史，写死的模板也会让它继续重复提问。
+
+解决方案分两部分。第一部分是加入会话历史，见 3.14。第二部分是把输出模板从固定四段式改成两个互斥模式：
+
+```text
+模式 A = 首轮，或用户还没回答过任何追问
+         临时判断 / 为什么这么判断 / 还需要确认 / 现在可以先做什么
+
+模式 B = 本轮用户消息是在回答之前的追问
+         结论更新 / 依据 / 接下来怎么练 / 仍需确认
+```
+
+并补充了配套的状态规则：
+
+```text
+历史是模型自己的记忆，不是外部资料
+已问过或已回答的问题绝不重复提问
+用户回复带编号列表时，按顺序映射回上一轮的问题
+模式 B 的「仍需确认」最多 2 条，且必须是没问过的
+追问满两轮后必须停止提问，直接给方案并标注假设
+```
+
+需要注意的是，长期记忆的抽取器仍然只看当前单条消息，`athlete_profile` 的 schema 也装不下「训练内容主要是间歇」「每三天一个休息日」这类信息。所以目前 Agent 能在当前会话内记住这些回答，但进程重启后会丢失，这两点留作后续改进。
+
+### 问题 23：Web 端发完一条消息之后就再也发不出第二条
+
+Web 控制台重构后发现，第一条消息能正常收到回答，但发送按钮之后一直保持禁用，用户发不出第二条消息。这等于让刚做好的多轮对话在网页端完全用不上。
+
+排查发现问题出在 SSE 的连接头上：
+
+```text
+_stream_chat 显式发送了 Connection: keep-alive
+BaseHTTPRequestHandler.send_header 读到 keep-alive 会把 close_connection 设为 False
+handler 返回后连接不关闭
+前端 reader.read() 永远等不到 done
+streamChat 不返回，finally 里的 setBusy(false) 就不会执行
+```
+
+两端一起修：
+
+```text
+后端把 SSE 的 Connection 改成 close，让流结束后释放连接
+前端收到 {"type": "done"} 事件就主动 cancel reader 并返回，不再依赖连接关闭
+```
+
+顺带修掉了另一个部署相关的坑：静态文件原来带 `Cache-Control: public, max-age=300`，而前端文件名没有版本号，所以每次部署后的 5 分钟内用户拿到的仍然是旧页面。现在静态资源统一改为 `no-cache`，每次回源校验。
+
 ## 5. 当前项目能力总结
 
 当前 `coros-report` 已经具备：
@@ -1451,6 +1667,12 @@ LLM 返回 kitchen bought 但没有食材或数量 -> 拒绝
 支持 evals/specs/datasets/judges 标准评估结构
 支持 LangGraph StateGraph 内部工作流
 支持 critic_review / revise_report 基础 Reflection 链路
+支持多轮对话会话历史，追问后能承接用户的回答
+支持按 Discord 频道和 Web 浏览器会话隔离对话历史
+支持会话空闲超时自动刷新
+支持 pending 追问状态，把用户的回答绑定回 Agent 的问题
+支持基于 tools 参数的真实 tool call 和多轮工具循环
+支持 VDOT 配速换算、比赛倒计时和模型主动写入长期记忆三个工具
 支持查看已加载能力包
 ```
 

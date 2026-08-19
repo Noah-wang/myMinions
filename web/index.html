@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AgentDeck</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="mark" aria-hidden="true">AD</span>
+        <h1>AgentDeck</h1>
+      </div>
+      <button type="button" id="newChat" class="ghost-button">新对话</button>
+    </header>
+
+    <main class="stage">
+      <div class="thread" id="chatLog" aria-live="polite">
+        <section class="welcome" id="welcome">
+          <h2>今天想聊点什么？</h2>
+          <p>训练复盘、跑步计划、菜谱和采购，直接说就行。</p>
+          <div class="suggestions" id="suggestions"></div>
+        </section>
+      </div>
+    </main>
+
+    <form class="composer" id="chatForm">
+      <label class="sr-only" for="messageInput">消息</label>
+      <textarea
+        id="messageInput"
+        rows="1"
+        placeholder="发消息……"
+        autocomplete="off"
+      ></textarea>
+      <button type="submit" id="sendButton" aria-label="发送">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path d="M4 12h13M12 5l7 7-7 7" fill="none" stroke="currentColor"
+                stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </form>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

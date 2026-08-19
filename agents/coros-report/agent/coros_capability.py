@@ -37,7 +37,7 @@ async def _running_ask(context: CommandContext, argument: str) -> None:
 
     await context.send("正在检索跑步书籍并生成回答...")
     try:
-        answer = await answer_running_question(question)
+        answer = await answer_running_question(question, context.conversation_id)
         await context.send_chunks(answer)
     except Exception as exc:
         await context.send(f"回答跑步问题失败：{exc}")

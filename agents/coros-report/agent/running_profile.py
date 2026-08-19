@@ -138,6 +138,27 @@ def _merge_profile(existing_profile: dict[str, Any], patch: dict[str, Any]) -> d
     return merged
 
 
+def read_athlete_profile() -> dict[str, Any]:
+    """读取当前的跑步长期档案。"""
+    agent_memory = get_agent_memory(AGENT_NAME)
+    profile = agent_memory.get("athlete_profile", {})
+    return profile if isinstance(profile, dict) else {}
+
+
+def apply_profile_patch(raw_patch: dict[str, Any]) -> str:
+    """把一份档案补丁合并进长期记忆。
+
+    供 save_running_profile 工具调用，由模型决定什么时候写。
+    """
+    patch = _normalize_patch(raw_patch)
+    if not patch:
+        return "没有可写入的内容。"
+
+    updated_profile = _merge_profile(read_athlete_profile(), patch)
+    update_agent_memory(AGENT_NAME, {"athlete_profile": updated_profile})
+    return f"已写入长期记忆：{', '.join(sorted(patch))}"
+
+
 async def update_running_profile_from_message(message: str) -> str:
     extraction = await complete_json(
         PROFILE_EXTRACT_PROMPT,

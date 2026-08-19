@@ -14,6 +14,7 @@ class CommandContext:
     channel: Any
     send: SendText
     send_chunks: SendText
+    conversation_id: str = "default"
 
 
 @dataclass(frozen=True)

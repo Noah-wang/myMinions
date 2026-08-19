@@ -34,12 +34,15 @@ async def _dispatch_interaction_command(
     try:
         await interaction.response.send_message(start_message)
         if interaction.channel is not None:
-            await orchestrator.dispatch_command(
-                client,
-                interaction.channel,
-                command_name,
-                argument,
-            )
+            # 命令要走 LLM、MCP 和知识库检索，耗时通常十几秒，
+            # 期间亮出 Discord 原生的「正在输入」，避免看起来像没反应。
+            async with interaction.channel.typing():
+                await orchestrator.dispatch_command(
+                    client,
+                    interaction.channel,
+                    command_name,
+                    argument,
+                )
     except Exception as exc:
         error_text = str(exc).strip() or exc.__class__.__name__
         if len(error_text) > 500:
@@ -289,12 +292,23 @@ def create_discord_client() -> discord.Client:
         if message.author.bot:
             return
 
+        orchestrator = get_orchestrator()
         try:
-            await get_orchestrator().dispatch_text(
-                client,
-                message.channel,
-                message.content,
-            )
+            # 只在能力频道亮「正在输入」。其他频道 dispatch_text 会立刻返回，
+            # 亮指示器既没意义，还会让 bot 看起来在到处打字。
+            if orchestrator.is_capabilities_channel(message.channel.id):
+                async with message.channel.typing():
+                    await orchestrator.dispatch_text(
+                        client,
+                        message.channel,
+                        message.content,
+                    )
+            else:
+                await orchestrator.dispatch_text(
+                    client,
+                    message.channel,
+                    message.content,
+                )
         except Exception as exc:
             error_text = str(exc).strip() or exc.__class__.__name__
             if len(error_text) > 500:
