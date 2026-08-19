@@ -8,6 +8,7 @@ dependencies = [
     "discord.py",
     "langgraph>=1.2.11",
     "mcp",
+    "numpy",
     "openai",
     "pypdf",
     "python-dotenv",

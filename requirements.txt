@@ -1,6 +1,7 @@
 apscheduler
 discord.py
 mcp
+numpy
 openai
 pypdf
 python-dotenv

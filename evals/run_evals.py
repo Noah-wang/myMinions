@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -36,6 +37,33 @@ def run_natural_language_routing_suite() -> tuple[dict[str, float], list[CaseRes
     return metrics, case_results, spec
 
 
+def run_rag_retrieval_suite() -> tuple[dict[str, float], list[Any], dict[str, Any], str]:
+    """跑真实检索链路。索引缺失时返回跳过原因而不是判失败。
+
+    这里才加载 .env：路由评测靠 configure_eval_environment 构造受控环境，
+    提前加载真实配置会污染它。
+    """
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT_DIR / ".env")
+
+    import rag_retrieval
+
+    spec = _load_json(ROOT_DIR / "evals" / "specs" / "rag_retrieval.json")
+    dataset = _load_json(ROOT_DIR / spec["dataset"])
+
+    available, reason = rag_retrieval.index_available()
+    if not available:
+        return {}, [], spec, reason
+
+    async def _run() -> list[Any]:
+        return [await rag_retrieval.judge_case(case) for case in dataset]
+
+    case_results = asyncio.run(_run())
+    metrics = rag_retrieval.score_results(case_results, dataset)
+    return metrics, case_results, spec, ""
+
+
 def _metric_threshold(spec: dict[str, Any], metric_name: str) -> float:
     return float(spec["metrics"][metric_name]["threshold"])
 
@@ -71,6 +99,21 @@ def _print_suite_result(
 def main() -> None:
     metrics, case_results, spec = run_natural_language_routing_suite()
     passed = _print_suite_result("natural_language_routing", metrics, case_results, spec)
+
+    print()
+    rag_metrics, rag_results, rag_spec, skip_reason = run_rag_retrieval_suite()
+    if skip_reason:
+        print("Suite: rag_retrieval")
+        print(f"SKIPPED: {skip_reason}")
+    else:
+        import rag_retrieval
+
+        print(f"Retrieval mode: {rag_retrieval.retrieval_mode()}")
+        passed = (
+            _print_suite_result("rag_retrieval", rag_metrics, rag_results, rag_spec)
+            and passed
+        )
+
     if not passed:
         raise SystemExit(1)
 

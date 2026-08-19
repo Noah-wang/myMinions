@@ -1,0 +1,191 @@
+[
+  {
+    "id": "book_vdot",
+    "question": "VDOT 是什么？怎么用它来定我的训练配速？",
+    "expected_kind": "book",
+    "must_contain_any": ["VDOT"]
+  },
+  {
+    "id": "book_threshold_pace",
+    "question": "阈值跑应该跑多快，一次跑多久合适？",
+    "expected_kind": "book",
+    "must_contain_any": ["乳酸门槛", "门槛跑"]
+  },
+  {
+    "id": "book_easy_run",
+    "question": "轻松跑到底有什么用，是不是跑慢了就没效果？",
+    "expected_kind": "book",
+    "must_contain_any": ["轻松跑"]
+  },
+  {
+    "id": "book_repetition",
+    "question": "重复跑和间歇跑有什么区别？",
+    "expected_kind": "book",
+    "must_contain_any": ["重复跑", "R训练", "R配速"],
+    "note": "书里主要用 R训练(104次)/R配速(87次) 指代重复跑(23次)。只写「重复跑」会把命中了正确内容的检索误判为失败。"
+  },
+  {
+    "id": "book_max_heart_rate",
+    "question": "用 220 减年龄估算最大心率准不准？",
+    "expected_kind": "book",
+    "must_contain_any": ["最大心率"]
+  },
+  {
+    "id": "book_altitude",
+    "question": "海拔高度会怎么影响跑步成绩和训练？",
+    "expected_kind": "book",
+    "must_contain_any": ["海拔"]
+  },
+  {
+    "id": "book_diminishing_returns",
+    "question": "训练量一直加下去收益会怎么变化？",
+    "expected_kind": "book",
+    "must_contain_any": ["收益递减"]
+  },
+  {
+    "id": "book_cadence",
+    "question": "跑步的步频应该控制在多少？",
+    "expected_kind": "book",
+    "must_contain_any": ["步频"]
+  },
+  {
+    "id": "book_weekly_mileage",
+    "question": "周跑量应该怎么增加才安全？",
+    "expected_kind": "book",
+    "must_contain_any": ["跑量"]
+  },
+  {
+    "id": "book_marathon_plan",
+    "question": "马拉松训练计划应该怎么安排？",
+    "expected_kind": "book",
+    "must_contain_any": ["马拉松"]
+  },
+  {
+    "id": "book_injury",
+    "question": "跑步受伤之后应该怎么处理训练？",
+    "expected_kind": "book",
+    "must_contain_any": ["受伤"]
+  },
+  {
+    "id": "book_warmup",
+    "question": "训练前的热身应该怎么做？",
+    "expected_kind": "book",
+    "must_contain_any": ["热身"]
+  },
+  {
+    "id": "book_tempo",
+    "question": "节奏跑是什么强度？",
+    "expected_kind": "book",
+    "must_contain_any": ["节奏跑", "乳酸门槛", "门槛跑"]
+  },
+  {
+    "id": "book_race_strategy",
+    "question": "比赛时的配速策略应该怎么定？",
+    "expected_kind": "book",
+    "must_contain_any": ["比赛策略", "配速"]
+  },
+  {
+    "id": "book_hydration",
+    "question": "长距离跑步过程中怎么补水？",
+    "expected_kind": "book",
+    "must_contain_any": ["补水", "补给"]
+  },
+  {
+    "id": "book_recovery",
+    "question": "两次高强度训练之间应该恢复多久？",
+    "expected_kind": "book",
+    "must_contain_any": ["恢复"]
+  },
+  {
+    "id": "pinpoint_t_volume_cap",
+    "question": "单次训练里 T 配速的累计距离最多不能超过周跑量的百分之多少？",
+    "expected_kind": "book",
+    "must_contain_any": ["周跑量的10%"],
+    "note": "定点事实类。答案是一个具体数字，只存在于少数几块里。"
+  },
+  {
+    "id": "pinpoint_long_run_cap",
+    "question": "长距离 L 跑的距离上限是周跑量的百分之多少？",
+    "expected_kind": "book",
+    "must_contain_any": ["周跑量的30%", "周跑量的25%"],
+    "note": "定点事实类。"
+  },
+  {
+    "id": "pinpoint_threshold_hr",
+    "question": "阈值强度大概对应最大心率的百分之多少？",
+    "expected_kind": "book",
+    "must_contain_any": ["最大心率的88%", "最大心率的86%"],
+    "note": "定点事实类。"
+  },
+  {
+    "id": "pinpoint_interval_recovery",
+    "question": "I 强度间歇之间的恢复慢跑应该跑多少秒？",
+    "expected_kind": "book",
+    "must_contain_any": ["90~120秒"],
+    "note": "定点事实类。这个数字全库只出现在一块里，最能区分粒度。"
+  },
+  {
+    "id": "pinpoint_stride_duration",
+    "question": "跨步跑 ST 一次持续多少秒？",
+    "expected_kind": "book",
+    "must_contain_any": ["10~20秒"],
+    "note": "定点事实类。"
+  },
+  {
+    "id": "pinpoint_marathon_weeks",
+    "question": "马拉松训练计划一共安排多少周？",
+    "expected_kind": "book",
+    "must_contain_any": ["18周"],
+    "note": "定点事实类。"
+  },
+  {
+    "id": "pinpoint_cruise_interval_min",
+    "question": "巡航间歇的 T 配速训练至少要跑多少公里？",
+    "expected_kind": "book",
+    "must_contain_any": ["6.4公里"],
+    "note": "定点事实类。"
+  },
+  {
+    "id": "pinpoint_video_frequency",
+    "question": "有氧耐力持续训练阶段每周训练几天？",
+    "expected_kind": "video",
+    "must_contain_any": ["4~5天", "每周4", "训练频率"],
+    "note": "定点事实类，答案在视频里。"
+  },
+  {
+    "id": "video_central_cardiac",
+    "question": "有氧耐力里的中央心肺因素要怎么练？",
+    "expected_kind": "video",
+    "must_contain_any": ["中央心肺"]
+  },
+  {
+    "id": "video_peripheral_muscle",
+    "question": "外周肌肉的有氧能力靠什么训练提升？",
+    "expected_kind": "video",
+    "must_contain_any": ["外周肌肉", "外周因素"]
+  },
+  {
+    "id": "video_blood_volume",
+    "question": "想提升总血量应该用什么强度训练？",
+    "expected_kind": "video",
+    "must_contain_any": ["总血量"]
+  },
+  {
+    "id": "video_periodization",
+    "question": "有氧耐力的周期训练一共分几个阶段？",
+    "expected_kind": "video",
+    "must_contain_any": ["周期训练", "第二阶段"]
+  },
+  {
+    "id": "video_low_glycogen",
+    "question": "低肌糖原训练高肌糖原比赛是怎么回事？",
+    "expected_kind": "video",
+    "must_contain_any": ["肌糖原"]
+  },
+  {
+    "id": "video_training_frequency",
+    "question": "有氧耐力这个阶段每周应该练几次？",
+    "expected_kind": "video",
+    "must_contain_any": ["训练频率", "每周"]
+  }
+]

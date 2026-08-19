@@ -1,3 +1,5 @@
+import { renderMarkdown } from "/markdown.js";
+
 const stage = document.querySelector(".stage");
 const chatLog = document.querySelector("#chatLog");
 const welcome = document.querySelector("#welcome");
@@ -41,80 +43,8 @@ function resetConversation() {
   input.focus();
 }
 
-/* 渲染 */
+/* 渲染：markdown 渲染器抽到 markdown.js，和技术页共用 */
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function renderInline(text) {
-  return text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-}
-
-function renderMarkdown(value) {
-  const html = [];
-  let list = null;
-
-  const closeList = () => {
-    if (list) {
-      html.push(`</${list}>`);
-      list = null;
-    }
-  };
-  const openList = (kind) => {
-    if (list !== kind) {
-      closeList();
-      html.push(`<${kind}>`);
-      list = kind;
-    }
-  };
-
-  for (const raw of escapeHtml(value).split("\n")) {
-    const line = raw.trim();
-    if (!line) {
-      closeList();
-      continue;
-    }
-
-    const heading = line.match(/^#{1,6}\s+(.*)$/);
-    if (heading) {
-      closeList();
-      html.push(`<h3>${renderInline(heading[1])}</h3>`);
-      continue;
-    }
-
-    if (line.startsWith("&gt;")) {
-      closeList();
-      html.push(`<blockquote>${renderInline(line.replace(/^&gt;\s?/, ""))}</blockquote>`);
-      continue;
-    }
-
-    const bullet = line.match(/^[-*]\s+(.*)$/);
-    if (bullet) {
-      openList("ul");
-      html.push(`<li>${renderInline(bullet[1])}</li>`);
-      continue;
-    }
-
-    const numbered = line.match(/^\d+[.、)]\s+(.*)$/);
-    if (numbered) {
-      openList("ol");
-      html.push(`<li>${renderInline(numbered[1])}</li>`);
-      continue;
-    }
-
-    closeList();
-    html.push(`<p>${renderInline(line)}</p>`);
-  }
-
-  closeList();
-  return html.join("");
-}
 
 function atBottom() {
   return stage.scrollHeight - stage.scrollTop - stage.clientHeight < 120;

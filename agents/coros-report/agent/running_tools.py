@@ -3,6 +3,7 @@ from datetime import date, datetime
 from typing import Any
 
 from running_profile import apply_profile_patch, read_athlete_profile
+from src.runtime.knowledge_health import inspect_knowledge_index
 from src.runtime.tools import Tool, ToolRegistry
 
 
@@ -293,7 +294,38 @@ SAVE_PROFILE_TOOL = Tool(
 )
 
 
+INSPECT_INDEX_TOOL = Tool(
+    name="inspect_knowledge_index",
+    description=(
+        "体检跑步知识库的分块质量，返回块数、来源分布、长度分布、"
+        "空块和被切断的块数量、向量对齐情况。"
+        "刚导入新资料后、或用户问知识库怎么样、检索为什么不准时调用。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "source": {
+                "type": "string",
+                "description": "只看某个来源，支持部分匹配，例如 BV1XN411G7AQ。不传则看全部。",
+            },
+        },
+        "required": [],
+    },
+    handler=inspect_knowledge_index,
+)
+
+
 def build_running_registry() -> ToolRegistry:
     return ToolRegistry(
-        (TRAINING_PACES_TOOL, RACE_COUNTDOWN_TOOL, SAVE_PROFILE_TOOL)
+        (
+            TRAINING_PACES_TOOL,
+            RACE_COUNTDOWN_TOOL,
+            SAVE_PROFILE_TOOL,
+            INSPECT_INDEX_TOOL,
+        )
     )
+
+
+def build_ingest_registry() -> ToolRegistry:
+    """导入资料后做质检用的最小工具集。"""
+    return ToolRegistry((INSPECT_INDEX_TOOL,))

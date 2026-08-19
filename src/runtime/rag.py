@@ -1,11 +1,22 @@
 import json
 import math
+import os
 import re
 from pathlib import Path
 from typing import Any
 
 from src.runtime.embeddings import embed_texts, embedding_configured, get_embedding_model
 
+try:  # numpy 是软依赖，没装就退回纯 Python 逐条计算
+    import numpy as np
+except ImportError:  # pragma: no cover
+    np = None
+
+
+# 检索返回条数。评测必须用同一个值，否则会测出一个生产并不使用的配置。
+# 实测：22 个用例的命中块全部落在前 3 名，hit@3 与 hit@5 同为 1.00，
+# 第 4、5 名从未被用到却要占掉约 40% 的检索上下文，而且 tool loop 每轮都会重发。
+DEFAULT_TOP_K = 3
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 KNOWLEDGE_DIR = ROOT_DIR / "data" / "knowledge" / "coros-report"
@@ -47,22 +58,36 @@ def _tokenize(text: str) -> list[str]:
     return english + chinese + expanded
 
 
+# 索引文件按 (路径, mtime) 缓存在进程内。
+# 之前每次检索都要重新解析 embeddings.json，光这一步就占掉大部分耗时，
+# 而文件只在重建索引时才变。mtime 作为键，重建后会自动失效。
+_file_cache: dict[str, tuple[float, Any]] = {}
+
+
+def _load_json_cached(path: Path, empty: Any) -> Any:
+    if not path.exists():
+        return empty
+
+    mtime = path.stat().st_mtime
+    cached = _file_cache.get(str(path))
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+
+    value = json.loads(path.read_text(encoding="utf-8"))
+    _file_cache[str(path)] = (mtime, value)
+    return value
+
+
 def _load_chunks() -> list[dict[str, Any]]:
-    if not CHUNKS_PATH.exists():
-        return []
-    return json.loads(CHUNKS_PATH.read_text(encoding="utf-8"))
+    return _load_json_cached(CHUNKS_PATH, [])
 
 
 def _load_index() -> dict[str, Any]:
-    if not INDEX_PATH.exists():
-        return {}
-    return json.loads(INDEX_PATH.read_text(encoding="utf-8"))
+    return _load_json_cached(INDEX_PATH, {})
 
 
 def _load_embeddings() -> dict[str, Any]:
-    if not EMBEDDINGS_PATH.exists():
-        return {}
-    return json.loads(EMBEDDINGS_PATH.read_text(encoding="utf-8"))
+    return _load_json_cached(EMBEDDINGS_PATH, {})
 
 
 def _cosine_similarity(left: list[float], right: list[float]) -> float:
@@ -96,29 +121,53 @@ def _phrase_boost(query: str, chunk_text: str) -> float:
     return boost
 
 
+_keyword_cache: dict[str, tuple[float, Any]] = {}
+
+
+def _keyword_index(chunks: list[dict[str, Any]]) -> dict[str, Any]:
+    """预计算词频和文档频率，按 index.json 的 mtime 缓存。
+
+    原来每次检索都要遍历三十多万个 token 重建这两张表，单次要两百多毫秒。
+    它们完全由索引文件决定，只在重建索引后才需要重算。
+    """
+    mtime = INDEX_PATH.stat().st_mtime if INDEX_PATH.exists() else 0.0
+    cached = _keyword_cache.get("keyword")
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+
+    token_index = _load_index().get("tokens", {})
+    counts_by_chunk: dict[str, dict[str, int]] = {}
+    document_frequency: dict[str, int] = {}
+
+    for chunk in chunks:
+        tokens = token_index.get(chunk["id"]) or _tokenize(chunk["text"])
+        counts: dict[str, int] = {}
+        for token in tokens:
+            counts[token] = counts.get(token, 0) + 1
+        counts_by_chunk[chunk["id"]] = counts
+        for token in counts:
+            document_frequency[token] = document_frequency.get(token, 0) + 1
+
+    value = {"counts": counts_by_chunk, "document_frequency": document_frequency}
+    _keyword_cache["keyword"] = (mtime, value)
+    return value
+
+
 def search_knowledge_keyword(query: str, limit: int = 5) -> list[dict[str, Any]]:
     chunks = _load_chunks()
-    index = _load_index()
-    token_index = index.get("tokens", {})
     query_tokens = set(_tokenize(query))
     if not chunks or not query_tokens:
         return []
 
+    keyword_index = _keyword_index(chunks)
+    document_frequency = keyword_index["document_frequency"]
     scored: list[tuple[float, dict[str, Any]]] = []
     total_chunks = max(len(chunks), 1)
-    document_frequency: dict[str, int] = {}
-    for tokens in token_index.values():
-        for token in set(tokens):
-            document_frequency[token] = document_frequency.get(token, 0) + 1
 
     for chunk in chunks:
-        chunk_tokens = token_index.get(chunk["id"], _tokenize(chunk["text"]))
-        if not chunk_tokens:
+        token_counts = keyword_index["counts"].get(chunk["id"])
+        if not token_counts:
             continue
-
-        token_counts: dict[str, int] = {}
-        for token in chunk_tokens:
-            token_counts[token] = token_counts.get(token, 0) + 1
 
         score = 0.0
         for token in query_tokens:
@@ -138,7 +187,125 @@ def search_knowledge_keyword(query: str, limit: int = 5) -> list[dict[str, Any]]
     return [chunk for _, chunk in scored[:limit]]
 
 
+_index_cache: dict[str, tuple[float, Any]] = {}
+
+
+def _build_vector_index(items: list[dict[str, Any]], chunk_ids: set[str]) -> Any:
+    """把子块向量整理成可直接做矩阵运算的形式，并按 mtime 缓存。
+
+    向量在这里就归一化好，检索时的余弦相似度退化成一次点积，
+    省掉每次查询都重复算模长。
+    """
+    parents: list[str] = []
+    rows: list[list[float]] = []
+    for item in items:
+        # 兼容旧格式：没有 parent_id 时，id 本身就是父块 id。
+        parent_id = item.get("parent_id") or item.get("id")
+        if not item.get("embedding") or parent_id not in chunk_ids:
+            continue
+        parents.append(parent_id)
+        rows.append(item["embedding"])
+
+    unique_parents = list(dict.fromkeys(parents))
+    parent_position = {parent_id: i for i, parent_id in enumerate(unique_parents)}
+    owner = [parent_position[parent_id] for parent_id in parents]
+
+    if np is not None:
+        matrix = np.asarray(rows, dtype=np.float32)
+        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        matrix = matrix / norms
+        owner_array = np.asarray(owner, dtype=np.int64)
+    else:
+        matrix = rows
+        owner_array = owner
+
+    return {"parents": unique_parents, "owner": owner_array, "matrix": matrix}
+
+
+def _vector_index(items: list[dict[str, Any]], chunk_ids: set[str]) -> Any:
+    mtime = EMBEDDINGS_PATH.stat().st_mtime if EMBEDDINGS_PATH.exists() else 0.0
+    cached = _index_cache.get("vectors")
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+
+    index = _build_vector_index(items, chunk_ids)
+    _index_cache["vectors"] = (mtime, index)
+    return index
+
+
+def _rank_parents(index: Any, query_vector: list[float], limit: int) -> list[str]:
+    """按父块取所属子块的最高分，返回前 limit 个父块 id。"""
+    parents = index["parents"]
+
+    if np is not None:
+        query = np.asarray(query_vector, dtype=np.float32)
+        norm = float(np.linalg.norm(query)) or 1.0
+        scores = index["matrix"] @ (query / norm)
+        best = np.full(len(parents), -np.inf, dtype=np.float32)
+        np.maximum.at(best, index["owner"], scores)
+        order = np.argsort(-best)[:limit]
+        return [parents[i] for i in order]
+
+    best_scores = [float("-inf")] * len(parents)
+    for position, vector in zip(index["owner"], index["matrix"], strict=True):
+        score = _cosine_similarity(query_vector, vector)
+        if score > best_scores[position]:
+            best_scores[position] = score
+    ranked = sorted(range(len(parents)), key=lambda i: best_scores[i], reverse=True)
+    return [parents[i] for i in ranked[:limit]]
+
+
+# 混合检索：向量和关键词各自出一份候选，再按排名融合。
+#
+# 默认关闭。实测在当前语料上融合只会变差：纯向量已经 hit@5 = 1.00，
+# 没有提升空间，关键词的排名反而会把正确结果挤出前列。
+# 向量权重从 1 加到 8（关键词几乎不起作用）时指标才逐步回到纯向量水平，
+# 说明关键词的每一分贡献都是负的，不是权重没调好。
+#
+# 代码和开关保留：语料规模变大、向量召回不再饱和之后，
+# 用 RAG_HYBRID_ENABLED=true 打开重跑评测就能重新判断。
+RRF_K = 60
+FUSION_CANDIDATES = 20
+
+
+def _hybrid_enabled() -> bool:
+    return os.getenv("RAG_HYBRID_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+
+
+def _hybrid_vector_weight() -> float:
+    try:
+        return float(os.getenv("RAG_VECTOR_WEIGHT", "1"))
+    except ValueError:
+        return 1.0
+
+
+def _reciprocal_rank_fusion(
+    ranked_lists: list[tuple[list[str], float]],
+    limit: int,
+) -> list[str]:
+    """加权 RRF 融合：只看排名不看分数。
+
+    向量的余弦相似度和关键词的 TF-IDF 分数量纲完全不同，
+    直接加权求和需要先做归一化，而归一化系数又要调参。
+    RRF 只用名次，天然免疫这个问题，也不受 _phrase_boost 那种硬加分影响。
+    权重用来体现两个召回器可信度不同。
+    """
+    scores: dict[str, float] = {}
+    for ranked, weight in ranked_lists:
+        for rank, item_id in enumerate(ranked, start=1):
+            scores[item_id] = scores.get(item_id, 0.0) + weight / (RRF_K + rank)
+    ordered = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    return [item_id for item_id, _ in ordered[:limit]]
+
+
 async def search_knowledge(query: str, limit: int = 5) -> list[dict[str, Any]]:
+    """父子块 + 混合检索。
+
+    子块小、向量不被稀释，负责精确匹配；父块大、上下文完整，负责投喂给模型。
+    多个子块可能命中同一个父块，按父块取最高分归并，避免一个父块占掉多个名额。
+    向量结果再和关键词结果做 RRF 融合。
+    """
     chunks = _load_chunks()
     embeddings = _load_embeddings()
     items = embeddings.get("items", [])
@@ -148,25 +315,37 @@ async def search_knowledge(query: str, limit: int = 5) -> list[dict[str, Any]]:
         return search_knowledge_keyword(query, limit)
 
     chunks_by_id = {chunk["id"]: chunk for chunk in chunks}
-    vectors_by_id = {
-        item["id"]: item["embedding"]
-        for item in items
-        if item.get("id") in chunks_by_id and item.get("embedding")
-    }
-    if len(vectors_by_id) != len(chunks):
+    index = _vector_index(items, set(chunks_by_id))
+    if len(index["parents"]) != len(chunks):
         return search_knowledge_keyword(query, limit)
 
     query_vector = (await embed_texts([query]))[0]
-    scored = [
-        (_cosine_similarity(query_vector, vector), chunks_by_id[chunk_id])
-        for chunk_id, vector in vectors_by_id.items()
+    if not _hybrid_enabled():
+        return [chunks_by_id[pid] for pid in _rank_parents(index, query_vector, limit)]
+
+    vector_ids = _rank_parents(index, query_vector, FUSION_CANDIDATES)
+    keyword_ids = [
+        chunk["id"] for chunk in search_knowledge_keyword(query, FUSION_CANDIDATES)
     ]
-    scored.sort(key=lambda item: item[0], reverse=True)
-    return [chunk for _, chunk in scored[:limit]]
+    fused = _reciprocal_rank_fusion(
+        [(vector_ids, _hybrid_vector_weight()), (keyword_ids, 1.0)], limit
+    )
+    return [chunks_by_id[parent_id] for parent_id in fused if parent_id in chunks_by_id]
+
+
+def format_page_label(chunk: dict[str, Any]) -> str:
+    """页码标签。跨页合并之后一块可能横跨多页，这时显示区间。"""
+    page = chunk.get("page", "?")
+    page_end = chunk.get("page_end", page)
+    if page_end != page:
+        return f"p.{page}-{page_end}"
+    return f"p.{page}"
 
 
 def format_context(chunks: list[dict[str, Any]]) -> str:
     lines: list[str] = []
     for index, chunk in enumerate(chunks, start=1):
-        lines.append(f"[{index}] {chunk['source']} p.{chunk['page']}\n{chunk['text']}")
+        lines.append(
+            f"[{index}] {chunk['source']} {format_page_label(chunk)}\n{chunk['text']}"
+        )
     return "\n\n".join(lines)

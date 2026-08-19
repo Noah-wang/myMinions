@@ -1,8 +1,11 @@
 import asyncio
+import collections
+import hashlib
 import json
 import os
 import re
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +16,18 @@ if str(ROOT_DIR) not in sys.path:
 from pypdf import PdfReader
 from dotenv import load_dotenv
 
+from src.runtime.chunking import (
+    BOILERPLATE_MAX_CHARS,
+    BOILERPLATE_MIN_CHARS,
+    BOILERPLATE_MIN_REPEATS,
+    BOILERPLATE_PAGE_RATIO,
+    CHILD_CHUNK_OVERLAP,
+    CHILD_CHUNK_SIZE,
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    MIN_CHUNK_CHARS,
+    current_config,
+)
 from src.runtime.embeddings import embed_texts, embedding_configured, get_embedding_model
 
 
@@ -22,10 +37,15 @@ VIDEOS_DIR = KNOWLEDGE_DIR / "videos"
 CHUNKS_PATH = KNOWLEDGE_DIR / "chunks.json"
 INDEX_PATH = KNOWLEDGE_DIR / "index.json"
 EMBEDDINGS_PATH = KNOWLEDGE_DIR / "embeddings.json"
+BUILD_INFO_PATH = KNOWLEDGE_DIR / "build_info.json"
 
-CHUNK_SIZE = 1200
-CHUNK_OVERLAP = 180
 DEFAULT_EMBEDDING_BATCH_SIZE = 20
+
+# 切块时优先在这些字符之后断开，避免把句子拦腰截断。
+# 找不到句末标点时退而求其次找逗号顿号，再找不到才硬切。
+SENTENCE_ENDINGS = "。！？；!?;\n"
+CLAUSE_ENDINGS = "，、,）)”"
+BREAK_SEARCH_WINDOW = 400
 
 
 def normalize_text(text: str) -> str:
@@ -53,25 +73,143 @@ def extract_text_document(path: Path) -> list[dict[str, Any]]:
     return [{"page": 1, "text": text}]
 
 
-def chunk_page(book_name: str, page: int, text: str) -> list[dict[str, Any]]:
+def find_boilerplate_lines(pages: list[dict[str, Any]]) -> set[str]:
+    """找出反复出现在多个页面上的行，基本都是页眉页脚水印和表注。
+
+    必须在跨页合并之前处理。合并之后它们会混进正常块的正文里，
+    到那时再按块去重就晚了。
+    """
+    counts = collections.Counter(
+        line.strip()
+        for page in pages
+        for line in page["text"].splitlines()
+        if BOILERPLATE_MIN_CHARS <= len(line.strip()) <= BOILERPLATE_MAX_CHARS
+    )
+    threshold = max(BOILERPLATE_MIN_REPEATS, int(len(pages) * BOILERPLATE_PAGE_RATIO))
+    return {line for line, count in counts.items() if count >= threshold}
+
+
+def strip_boilerplate(
+    pages: list[dict[str, Any]],
+    boilerplate: set[str],
+) -> tuple[list[dict[str, Any]], int]:
+    cleaned: list[dict[str, Any]] = []
+    removed = 0
+    for page in pages:
+        kept_lines = []
+        for line in page["text"].splitlines():
+            if line.strip() in boilerplate:
+                removed += 1
+                continue
+            kept_lines.append(line)
+        text = normalize_text("\n".join(kept_lines))
+        if text:
+            cleaned.append({"page": page["page"], "text": text})
+    return cleaned, removed
+
+
+def build_document(pages: list[dict[str, Any]]) -> tuple[str, list[tuple[int, int]]]:
+    """把一个来源的所有页拼成整篇，并记录每页起始的字符偏移。
+
+    跨页拼接是为了让 CHUNK_OVERLAP 真正生效。原来按页单独切块时，
+    跨页的句子会被硬切，而 overlap 只在页内起作用。
+    """
+    parts: list[str] = []
+    spans: list[tuple[int, int]] = []
+    offset = 0
+    for page in pages:
+        spans.append((offset, page["page"]))
+        parts.append(page["text"])
+        offset += len(page["text"]) + 1
+    return "\n".join(parts), spans
+
+
+def page_at(spans: list[tuple[int, int]], offset: int) -> int:
+    page = spans[0][1] if spans else 1
+    for start, page_number in spans:
+        if start > offset:
+            break
+        page = page_number
+    return page
+
+
+def find_break(text: str, start: int, end: int) -> int:
+    """在 end 附近往回找断点。
+
+    先找句末标点；书里有大量没有句号的表格，所以再退一步找逗号顿号；
+    都找不到才硬切。
+    """
+    if end >= len(text):
+        return len(text)
+
+    lower_bound = max(start + 1, end - BREAK_SEARCH_WINDOW)
+    for candidates in (SENTENCE_ENDINGS, CLAUSE_ENDINGS):
+        for index in range(end - 1, lower_bound - 1, -1):
+            if text[index] in candidates:
+                return index + 1
+    return end
+
+
+def video_context(text: str, source: str) -> str:
+    """从视频 md 的头部抽出文档级前缀。
+
+    原来这段头部只落在第 1 块里，第 2 块之后完全不知道自己是哪个视频。
+    """
+    bv = re.search(r"Source:\s*(\S+)", text)
+    label = bv.group(1) if bv else source
+    return f"B站跑步视频字幕 {label}"
+
+
+def chunk_document(
+    source: str,
+    kind: str,
+    text: str,
+    spans: list[tuple[int, int]],
+    context: str,
+) -> list[dict[str, Any]]:
     chunks: list[dict[str, Any]] = []
     start = 0
     while start < len(text):
-        end = min(start + CHUNK_SIZE, len(text))
+        hard_end = min(start + CHUNK_SIZE, len(text))
+        end = find_break(text, start, hard_end)
         chunk_text = text[start:end].strip()
         if chunk_text:
+            page = page_at(spans, start)
             chunks.append(
                 {
-                    "id": f"{book_name}:p{page}:c{len(chunks) + 1}",
-                    "source": book_name,
+                    "id": f"{source}:p{page}:c{len(chunks) + 1}",
+                    "source": source,
+                    "kind": kind,
                     "page": page,
+                    "page_end": page_at(spans, max(end - 1, start)),
+                    # text 是原文，用于展示引用；context 只参与嵌入，不展示
                     "text": chunk_text,
+                    "context": f"{context} 第{page}页" if kind == "book" else context,
                 }
             )
-        if end == len(text):
+        if end >= len(text):
             break
-        start = max(0, end - CHUNK_OVERLAP)
+        # 重叠起点也要对齐到句子边界。直接用 end - CHUNK_OVERLAP 会退回到
+        # 上一块的句子中间，导致几乎每一块都从半句话开始。
+        overlap_start = max(start + 1, end - CHUNK_OVERLAP)
+        start = max(start + 1, find_break(text, start, overlap_start))
     return chunks
+
+
+def filter_chunks(chunks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """丢掉空块和过短块。页眉页脚已经在合并前按行去掉了。"""
+    kept: list[dict[str, Any]] = []
+    dropped = {"empty": 0, "too_short": 0}
+    for chunk in chunks:
+        text = chunk["text"].strip()
+        if not text:
+            dropped["empty"] += 1
+            continue
+        if len(text) < MIN_CHUNK_CHARS:
+            dropped["too_short"] += 1
+            continue
+        kept.append(chunk)
+    return kept, dropped
 
 
 def tokenize(text: str) -> list[str]:
@@ -87,24 +225,166 @@ def tokenize(text: str) -> list[str]:
     return english + chinese
 
 
+def embedding_text(context: str, text: str) -> str:
+    """嵌入用的文本 = 文档级前缀 + 原文。
+
+    前缀让每一块都带上来源身份，缓解块内指代缺失；原文一个字不改，
+    引用展示时仍然是页面上真实存在的文字。
+    """
+    return f"{context}\n{text}" if context else text
+
+
+def split_children(parent: dict[str, Any]) -> list[dict[str, Any]]:
+    """把一个父块切成若干子块。子块只用于向量匹配，不展示给用户。"""
+    text = parent["text"]
+    if CHILD_CHUNK_SIZE <= 0 or len(text) <= CHILD_CHUNK_SIZE:
+        return [{"id": f"{parent['id']}:s1", "parent_id": parent["id"], "text": text}]
+
+    children: list[dict[str, Any]] = []
+    start = 0
+    while start < len(text):
+        hard_end = min(start + CHILD_CHUNK_SIZE, len(text))
+        end = find_break(text, start, hard_end)
+        child_text = text[start:end].strip()
+        if child_text:
+            children.append(
+                {
+                    "id": f"{parent['id']}:s{len(children) + 1}",
+                    "parent_id": parent["id"],
+                    "text": child_text,
+                }
+            )
+        if end >= len(text):
+            break
+        overlap_start = max(start + 1, end - CHILD_CHUNK_OVERLAP)
+        start = max(start + 1, find_break(text, start, overlap_start))
+    return children or [{"id": f"{parent['id']}:s1", "parent_id": parent["id"], "text": text}]
+
+
+def embedding_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def load_cached_vectors() -> dict[str, list[float]]:
+    """按内容哈希索引已有向量。
+
+    用内容而不是块 ID 作键：块 ID 里带页码，页码会随分块策略变，
+    而内容没变就没必要重算。换了 embedding 模型则整份缓存作废。
+    """
+    if not EMBEDDINGS_PATH.exists():
+        return {}
+    try:
+        payload = json.loads(EMBEDDINGS_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    if payload.get("model") != get_embedding_model():
+        return {}
+    return {
+        item["hash"]: item["embedding"]
+        for item in payload.get("items", [])
+        if item.get("hash") and item.get("embedding")
+    }
+
+
 async def write_embeddings(chunks: list[dict[str, Any]]) -> None:
+    """只对内容变化的子块调用 embedding API。
+
+    切块本身是纯本地计算，每次全量重来无所谓，还顺带保证了删除传播：
+    源文件没了就不会出现在 children 里，它的向量自然不会被写出去。
+    真正花钱的是嵌入，所以增量只做在这一层。
+    """
+    contexts = {chunk["id"]: chunk.get("context", "") for chunk in chunks}
+    children = [child for chunk in chunks for child in split_children(chunk)]
+    for child in children:
+        child["embed_text"] = embedding_text(contexts[child["parent_id"]], child["text"])
+        child["hash"] = embedding_hash(child["embed_text"])
+
+    cached = load_cached_vectors()
+    vectors: dict[str, list[float]] = {}
+    pending_hashes: list[str] = []
+    pending_texts: list[str] = []
+    queued: set[str] = set()
+
+    for child in children:
+        digest = child["hash"]
+        if digest in vectors or digest in queued:
+            continue
+        if digest in cached:
+            vectors[digest] = cached[digest]
+        else:
+            pending_hashes.append(digest)
+            pending_texts.append(child["embed_text"])
+            queued.add(digest)
+
+    reused = sum(1 for child in children if child["hash"] in cached)
+    print(f"Reusing {reused}/{len(children)} child vectors from cache")
+
     batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", DEFAULT_EMBEDDING_BATCH_SIZE))
-    items: list[dict[str, Any]] = []
-    for start in range(0, len(chunks), batch_size):
-        batch = chunks[start : start + batch_size]
-        vectors = await embed_texts([chunk["text"] for chunk in batch])
-        for chunk, vector in zip(batch, vectors, strict=True):
-            items.append({"id": chunk["id"], "embedding": vector})
-        print(f"Embedded {len(items)}/{len(chunks)} chunks")
+    done = 0
+    for start in range(0, len(pending_hashes), batch_size):
+        batch_hashes = pending_hashes[start : start + batch_size]
+        batch_texts = pending_texts[start : start + batch_size]
+        computed = await embed_texts(batch_texts)
+        for digest, vector in zip(batch_hashes, computed, strict=True):
+            vectors[digest] = vector
+        done += len(batch_hashes)
+        print(f"Embedded {done}/{len(pending_hashes)} new child chunks")
+
+    if not pending_hashes:
+        print("Nothing changed, no embedding API calls made")
 
     payload = {
         "model": get_embedding_model(),
         "chunk_count": len(chunks),
-        "items": items,
+        "child_count": len(children),
+        "items": [
+            {
+                "id": child["id"],
+                "parent_id": child["parent_id"],
+                "hash": child["hash"],
+                "embedding": vectors[child["hash"]],
+            }
+            for child in children
+        ],
     }
     EMBEDDINGS_PATH.write_text(
         json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8"
     )
+
+
+def build_chunks() -> tuple[list[dict[str, Any]], dict[str, int]]:
+    raw: list[dict[str, Any]] = []
+    boilerplate_lines = 0
+
+    for pdf_path in sorted(BOOKS_DIR.glob("*.pdf")):
+        pages = extract_pdf(pdf_path)
+        if not pages:
+            continue
+        pages, removed = strip_boilerplate(pages, find_boilerplate_lines(pages))
+        boilerplate_lines += removed
+        text, spans = build_document(pages)
+        raw.extend(
+            chunk_document(pdf_path.name, "book", text, spans, f"《{pdf_path.stem}》")
+        )
+
+    for text_path in sorted([*VIDEOS_DIR.glob("*.md"), *VIDEOS_DIR.glob("*.txt")]):
+        pages = extract_text_document(text_path)
+        if not pages:
+            continue
+        text, spans = build_document(pages)
+        raw.extend(
+            chunk_document(
+                text_path.name,
+                "video",
+                text,
+                spans,
+                video_context(text, text_path.name),
+            )
+        )
+
+    kept, dropped = filter_chunks(raw)
+    dropped["boilerplate_lines"] = boilerplate_lines
+    return kept, dropped
 
 
 def main() -> None:
@@ -113,15 +393,7 @@ def main() -> None:
     VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
     KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
 
-    chunks: list[dict[str, Any]] = []
-    for pdf_path in sorted(BOOKS_DIR.glob("*.pdf")):
-        pages = extract_pdf(pdf_path)
-        for page in pages:
-            chunks.extend(chunk_page(pdf_path.name, page["page"], page["text"]))
-    for text_path in sorted([*VIDEOS_DIR.glob("*.md"), *VIDEOS_DIR.glob("*.txt")]):
-        pages = extract_text_document(text_path)
-        for page in pages:
-            chunks.extend(chunk_page(text_path.name, page["page"], page["text"]))
+    chunks, dropped = build_chunks()
 
     index = {
         "chunk_count": len(chunks),
@@ -136,7 +408,31 @@ def main() -> None:
         json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
 
+    # 把产生这份索引的配置一并写盘。没有它就没法发现
+    # "索引是用 700 建的，但代码默认值是 400" 这种漂移。
+    BUILD_INFO_PATH.write_text(
+        json.dumps(
+            {
+                "built_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                "chunk_count": len(chunks),
+                "sources": index["sources"],
+                "config": current_config(),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
     print(f"Wrote {len(chunks)} chunks to {CHUNKS_PATH}")
+    print(f"Build config: {current_config()}")
+    print(
+        "Dropped: "
+        f"empty={dropped['empty']} "
+        f"too_short={dropped['too_short']} "
+        f"boilerplate_lines={dropped['boilerplate_lines']}"
+    )
     for source in index["sources"]:
         print(f"- {source}")
 

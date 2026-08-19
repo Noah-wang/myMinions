@@ -1,0 +1,16 @@
+{
+  "built_at": "2026-08-19T18:40:59+00:00",
+  "chunk_count": 145,
+  "sources": [
+    "20260816233352-BV1XN411G7AQ.md",
+    "Daniels Running Training Method.pdf"
+  ],
+  "config": {
+    "chunk_size": 1200,
+    "chunk_overlap": 180,
+    "child_chunk_size": 700,
+    "child_chunk_overlap": 100,
+    "min_chunk_chars": 40,
+    "boilerplate_page_ratio": 0.05
+  }
+}

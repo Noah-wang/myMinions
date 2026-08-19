@@ -113,6 +113,116 @@ def _demo_response(prompt: str) -> DemoResponse:
     )
 
 
+REPORT_PATH = ROOT_DIR / "docs" / "project-iteration-report.md"
+RAG_DOC_PATH = ROOT_DIR / "docs" / "rag-pipeline.md"
+
+
+def _split_report(text: str) -> list[dict[str, Any]]:
+    """把迭代报告按 ## / ### 两级拆开。"""
+    sections: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    subsection: dict[str, Any] | None = None
+    in_code_block = False
+
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            in_code_block = not in_code_block
+
+        if in_code_block:
+            # 代码块里的 ## 是示例内容，不是章节标题。
+            # 文档里引用过 prompt 模板中的「## 引用原文」，不排除就会把章节劈开。
+            if current is not None:
+                target = subsection["body"] if subsection is not None else current["body"]
+                target.append(line)
+            continue
+
+        if line.startswith("## "):
+            current = {"title": line[3:].strip(), "body": [], "subs": []}
+            subsection = None
+            sections.append(current)
+        elif line.startswith("### ") and current is not None:
+            subsection = {"title": line[4:].strip(), "body": []}
+            current["subs"].append(subsection)
+        elif current is not None:
+            target = subsection["body"] if subsection is not None else current["body"]
+            target.append(line)
+
+    return sections
+
+
+def _find_section(sections: list[dict[str, Any]], prefix: str) -> dict[str, Any] | None:
+    for section in sections:
+        if section["title"].startswith(prefix):
+            return section
+    return None
+
+
+def _flatten(section: dict[str, Any] | None) -> str:
+    if section is None:
+        return ""
+    parts = ["\n".join(section["body"]).strip()]
+    for sub in section["subs"]:
+        parts.append(f"### {sub['title']}\n" + "\n".join(sub["body"]).strip())
+    return "\n\n".join(part for part in parts if part).strip()
+
+
+def _items(section: dict[str, Any] | None) -> list[dict[str, str]]:
+    if section is None:
+        return []
+    return [
+        {"title": sub["title"], "body": "\n".join(sub["body"]).strip()}
+        for sub in section["subs"]
+    ]
+
+
+def _tech_payload() -> dict[str, Any]:
+    """把迭代报告整理成三个 tab 供网页展示。
+
+    文档本身就是按「结构演进 / 核心功能 / 问题与解决」组织的，
+    所以这里只做映射，不额外维护一份内容，避免两处不同步。
+    """
+    if not REPORT_PATH.exists():
+        return {"tabs": []}
+
+    sections = _split_report(REPORT_PATH.read_text(encoding="utf-8"))
+    structure = _find_section(sections, "2.")
+    features = _find_section(sections, "3.")
+    problems = _find_section(sections, "4.")
+    summary = _find_section(sections, "5.")
+
+    overview: list[dict[str, str]] = []
+    if summary is not None:
+        overview.append({"title": "能力总结", "body": _flatten(summary)})
+    if structure is not None:
+        overview.append({"title": "项目结构", "body": _flatten(structure)})
+
+    return {
+        "tabs": [
+            {"key": "stack", "title": "包含的技术", "items": overview},
+            {"key": "path", "title": "升级路径", "items": _items(features)},
+            {"key": "problems", "title": "遇到的困难和解决方法", "items": _items(problems)},
+            {"key": "rag", "title": "RAG 全流程", "items": _rag_items()},
+        ]
+    }
+
+
+def _rag_items() -> list[dict[str, str]]:
+    """RAG 全流程文档按 ## 一级标题拆成条目。
+
+    这份文档只有一层标题，每个标题就是流水线里的一个环节，
+    所以直接用顶级 section 当条目，不像迭代报告那样取子节。
+    """
+    if not RAG_DOC_PATH.exists():
+        return []
+
+    sections = _split_report(RAG_DOC_PATH.read_text(encoding="utf-8"))
+    return [
+        {"title": section["title"], "body": "\n".join(section["body"]).strip()}
+        for section in sections
+        if "\n".join(section["body"]).strip()
+    ]
+
+
 def _json_response(payload: Any, status: HTTPStatus = HTTPStatus.OK) -> tuple[int, bytes, str]:
     return status.value, json.dumps(payload, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8"
 
@@ -141,6 +251,12 @@ class WebHandler(BaseHTTPRequestHandler):
                 "sample_prompts": SAMPLE_PROMPTS,
             }
             self._send(*_json_response(payload), include_body=include_body)
+            return
+        if parsed.path == "/api/tech":
+            self._send(*_json_response(_tech_payload()), include_body=include_body)
+            return
+        if parsed.path == "/tech":
+            self._serve_static("/tech.html", include_body=include_body)
             return
         self._serve_static(parsed.path, include_body=include_body)
 

@@ -1,0 +1,94 @@
+{
+  "name": "rag_retrieval",
+  "version": "1.0.0",
+  "objective": "Evaluate whether the running knowledge base retrieves chunks that actually contain the answer, so that chunking strategy changes can be compared instead of guessed at.",
+  "unit_under_test": "src.runtime.rag.search_knowledge",
+  "dataset": "evals/datasets/rag_retrieval.json",
+  "judge": "evals/judges/rag_retrieval.py",
+  "metrics": {
+    "book_hit_rate": {
+      "description": "Hit rate restricted to questions answered by the PDF book.",
+      "threshold": 0.95
+    },
+    "video_hit_rate": {
+      "description": "Hit rate restricted to questions only the Bilibili subtitle answers. Guards against the video being drowned out, since it is roughly 6% of the index.",
+      "threshold": 0.71
+    },
+    "hit_rate_at_1": {
+      "description": "Questions where the very first retrieved chunk is already correct. hit@5 saturates on a small corpus; this is the metric that can actually detect an improvement in chunk granularity.",
+      "threshold": 0.83
+    },
+    "pinpoint_hit_rate_at_1": {
+      "description": "hit@1 restricted to pinpoint factual questions, which are most sensitive to chunk size because a large chunk buries the specific number inside a long passage.",
+      "threshold": 0.62
+    },
+    "hit_rate_at_k": {
+      "description": "Questions where at least one of the top-k chunks is correct. k is src.runtime.rag.DEFAULT_TOP_K, the same value production uses, so this measures the real configuration.",
+      "threshold": 0.93
+    },
+    "mrr_at_k": {
+      "description": "Mean reciprocal rank of the first correct chunk within top-k.",
+      "threshold": 0.86
+    },
+    "pinpoint_hit_rate_at_k": {
+      "description": "hit@k restricted to pinpoint factual questions.",
+      "threshold": 0.87
+    }
+  },
+  "constraints": [
+    "This suite must hit the real retrieval path: real embedding call for the query, real index for candidates.",
+    "Skip the suite instead of failing it when chunks.json or embeddings.json is missing.",
+    "Report whether retrieval ran in vector mode or fell back to keyword mode, because rag.py degrades silently.",
+    "Ground truth is keyword presence, not page numbers. Page numbers shift whenever chunking changes, and chunking is what this suite measures.",
+    "Thresholds are set just below the measured baseline so the suite acts as a regression guard, not an aspiration.",
+    "Judge must use src.runtime.rag.DEFAULT_TOP_K, not a hardcoded k. The judge previously hardcoded 5 while production used 3, which overstated coverage."
+  ],
+  "baseline": {
+    "measured_at": "2026-08-19",
+    "top_k": 3,
+    "chunking": "父块 1200 + 子块 700（CHILD_CHUNK_SIZE=700），145 父块 / 290 子向量",
+    "retrieval": "NumPy 向量化，混合检索默认关闭",
+    "cases": 30,
+    "hit_rate_at_k": 0.97,
+    "hit_rate_at_1": 0.87,
+    "mrr_at_k": 0.91,
+    "book_hit_rate": 1.0,
+    "video_hit_rate": 0.86,
+    "pinpoint_hit_rate_at_1": 0.75,
+    "pinpoint_hit_rate_at_k": 1.0,
+    "note": "此前 judge 写死 k=5 而生产用 k=3，报出的 hit_rate 和 video_hit_rate 都偏高一档。改为共用 rag.DEFAULT_TOP_K 后重新量得此基线。唯一失败用例 video_blood_volume 排第 4。"
+  },
+  "experiments": [
+    {
+      "config": "单层块 145 个 × 1200 字符",
+      "hit_rate_at_5": 1.0,
+      "hit_rate_at_1": 0.83,
+      "mrr_at_5": 0.91,
+      "pinpoint_hit_rate_at_1": 0.88,
+      "pinpoint_hit_rate_at_5": 1.0,
+      "verdict": "基准。定点题 hit@1 最高，推翻了「大块会稀释定点查询」的假设。"
+    },
+    {
+      "config": "父子块，子块 400 字符（585 子向量）",
+      "hit_rate_at_5": 0.97,
+      "hit_rate_at_1": 0.8,
+      "mrr_at_5": 0.88,
+      "pinpoint_hit_rate_at_1": 0.75,
+      "pinpoint_hit_rate_at_5": 0.88,
+      "verdict": "明显更差。子块切太碎，丢失局部主题句；按父块取子块最高分等于在多个噪声估计里取最大值，放大假阳性。"
+    },
+    {
+      "config": "父子块，子块 700 字符（290 子向量）",
+      "hit_rate_at_5": 1.0,
+      "hit_rate_at_1": 0.87,
+      "mrr_at_5": 0.92,
+      "pinpoint_hit_rate_at_1": 0.75,
+      "pinpoint_hit_rate_at_5": 1.0,
+      "verdict": "与单层块统计上打平：整体 hit@1 多命中 1 个用例，定点 hit@1 少命中 1 个。30 个用例分辨不出高下。选它是因为语料增长后子块粒度更有优势，而不是因为当前更好。"
+    },
+    {
+      "config": "混合检索 RRF 融合（向量 + 关键词 TF-IDF）",
+      "verdict": "更差，已默认关闭。等权时 hit@k 1.00→0.93、book_hit 1.00→0.91；向量权重加到 8:1 才回到纯向量水平，说明关键词的每一分贡献都是负的。结构性原因：纯向量已经饱和，融合只能把正确结果挤出去。代码和 RAG_HYBRID_ENABLED 开关保留，语料变大后可重新评估。"
+    }
+  ]
+}
