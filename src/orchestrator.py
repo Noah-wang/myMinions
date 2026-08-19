@@ -225,12 +225,12 @@ class MainAgentOrchestrator:
         client: object,
         channel: MessageChannel,
         content: str,
+        # 默认值必须和 web_server.WEB_COMMANDS 一样是只读集合。
+        # 留着写命令的话，任何不传这个参数的调用方都会绕过收窄。
         allowed_commands: tuple[str, ...] = (
             "coros",
             "coros-tools",
             "running",
-            "running-video",
-            "feel",
             "feelings",
             "kitchen",
         ),
@@ -256,10 +256,13 @@ class MainAgentOrchestrator:
             if command_name not in allowed_commands:
                 await channel.send("这个网页入口不支持这个命令。")
                 return None
+            if not self._is_read_only_command(command_name, argument):
+                await channel.send("网页入口是只读的，写操作请在 Discord 里进行。")
+                return None
 
             try:
                 handled = await self._registry.dispatch_command(
-                    self._command_context(client, channel),
+                    self._command_context(client, channel, read_only=True),
                     command_name,
                     argument.strip(),
                 )
@@ -278,7 +281,7 @@ class MainAgentOrchestrator:
         ):
             self._log("web_pending_answer_dispatch command=running")
             await self._registry.dispatch_command(
-                self._command_context(client, channel),
+                self._command_context(client, channel, read_only=True),
                 "running",
                 stripped,
             )
@@ -304,13 +307,21 @@ class MainAgentOrchestrator:
             )
             return None
 
+        if not self._is_read_only_command(route.command_name, route.argument):
+            self._log(
+                "web_write_rejected "
+                f"command={route.command_name} argument={route.argument!r}"
+            )
+            await channel.send("网页入口是只读的，写操作请在 Discord 里进行。")
+            return None
+
         self._log(
             "web_natural_language_dispatch "
             f"command={route.command_name} argument={route.argument!r}"
         )
         try:
             await self._registry.dispatch_command(
-                self._command_context(client, channel),
+                self._command_context(client, channel, read_only=True),
                 route.command_name,
                 route.argument,
             )
@@ -541,6 +552,18 @@ User message:
             return bool(rest.strip())
         return False
 
+    # kitchen 把读和写混在同一个命令里，所以只读入口要按动作拦。
+    READ_ONLY_KITCHEN_ACTIONS = {"recipes", "shopping", "pantry", "today", "expiring"}
+
+    def _is_read_only_command(self, command_name: str, argument: str) -> bool:
+        """判断这条命令在只读入口是否放行。"""
+        if command_name in {"feel", "running-video"}:
+            return False
+        if command_name == "kitchen":
+            action = argument.strip().partition(" ")[0]
+            return action in self.READ_ONLY_KITCHEN_ACTIONS
+        return True
+
     def _valid_running_video_argument(self, argument: str) -> bool:
         """验证导入跑步视频的参数，必须包含 BV 号或 bilibili 链接。"""
         if not argument:
@@ -560,6 +583,7 @@ User message:
         self,
         client: object,
         channel: MessageChannel,
+        read_only: bool = False,
     ) -> CommandContext:
         """构造 Agent 执行指令时所需的上下文对象（包括发送文本及分片发送方法）。
 
@@ -578,6 +602,7 @@ User message:
             send=send_text,
             send_chunks=send_chunks,
             conversation_id=self._conversation_id(channel),
+            read_only=read_only,
         )
 
     def _conversation_id(self, channel: MessageChannel) -> str:

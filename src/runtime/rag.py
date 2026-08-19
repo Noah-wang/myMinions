@@ -18,6 +18,12 @@ except ImportError:  # pragma: no cover
 # 第 4、5 名从未被用到却要占掉约 40% 的检索上下文，而且 tool loop 每轮都会重发。
 DEFAULT_TOP_K = 3
 
+# BM25 参数。k1 控制词频饱和速度，b 控制长度归一化强度，取业界常用值。
+BM25_K1 = float(os.getenv("BM25_K1", "1.2"))
+BM25_B = float(os.getenv("BM25_B", "0.75"))
+# 短语加权的强度，单位是「一个最强查询词的 IDF」。设 0 即关闭。
+PHRASE_BOOST_WEIGHT = float(os.getenv("KEYWORD_PHRASE_BOOST", "1.0"))
+
 ROOT_DIR = Path(__file__).resolve().parents[2]
 KNOWLEDGE_DIR = ROOT_DIR / "data" / "knowledge" / "coros-report"
 RAG_DIR = KNOWLEDGE_DIR
@@ -125,9 +131,9 @@ _keyword_cache: dict[str, tuple[float, Any]] = {}
 
 
 def _keyword_index(chunks: list[dict[str, Any]]) -> dict[str, Any]:
-    """预计算词频和文档频率，按 index.json 的 mtime 缓存。
+    """预计算 BM25 需要的统计量，按 index.json 的 mtime 缓存。
 
-    原来每次检索都要遍历三十多万个 token 重建这两张表，单次要两百多毫秒。
+    原来每次检索都要遍历三十多万个 token 重建这些表，单次要两百多毫秒。
     它们完全由索引文件决定，只在重建索引后才需要重算。
     """
     mtime = INDEX_PATH.stat().st_mtime if INDEX_PATH.exists() else 0.0
@@ -137,6 +143,7 @@ def _keyword_index(chunks: list[dict[str, Any]]) -> dict[str, Any]:
 
     token_index = _load_index().get("tokens", {})
     counts_by_chunk: dict[str, dict[str, int]] = {}
+    lengths: dict[str, int] = {}
     document_frequency: dict[str, int] = {}
 
     for chunk in chunks:
@@ -145,12 +152,30 @@ def _keyword_index(chunks: list[dict[str, Any]]) -> dict[str, Any]:
         for token in tokens:
             counts[token] = counts.get(token, 0) + 1
         counts_by_chunk[chunk["id"]] = counts
+        lengths[chunk["id"]] = len(tokens)
         for token in counts:
             document_frequency[token] = document_frequency.get(token, 0) + 1
 
-    value = {"counts": counts_by_chunk, "document_frequency": document_frequency}
+    average_length = (sum(lengths.values()) / len(lengths)) if lengths else 1.0
+    value = {
+        "counts": counts_by_chunk,
+        "document_frequency": document_frequency,
+        "lengths": lengths,
+        "average_length": max(average_length, 1.0),
+    }
     _keyword_cache["keyword"] = (mtime, value)
     return value
+
+
+def _bm25_idf(document_frequency: int, total_chunks: int) -> float:
+    """BM25 的 IDF，用 Lucene 的变体保证非负。
+
+    普通 TF-IDF 的 idf 在词出现在超过一半文档时会变成负数，
+    对中文 2/3/4 字滑窗切出来的高频碎片尤其容易触发。
+    """
+    return math.log(
+        1 + (total_chunks - document_frequency + 0.5) / (document_frequency + 0.5)
+    )
 
 
 def search_knowledge_keyword(query: str, limit: int = 5) -> list[dict[str, Any]]:
@@ -161,6 +186,8 @@ def search_knowledge_keyword(query: str, limit: int = 5) -> list[dict[str, Any]]
 
     keyword_index = _keyword_index(chunks)
     document_frequency = keyword_index["document_frequency"]
+    lengths = keyword_index["lengths"]
+    average_length = keyword_index["average_length"]
     scored: list[tuple[float, dict[str, Any]]] = []
     total_chunks = max(len(chunks), 1)
 
@@ -169,16 +196,25 @@ def search_knowledge_keyword(query: str, limit: int = 5) -> list[dict[str, Any]]
         if not token_counts:
             continue
 
+        # BM25 相对 TF-IDF 多两件事：
+        # 词频饱和（出现 20 次不等于出现 1 次的 20 倍）
+        # 长度归一化（长文档天然包含更多的每个词，要除掉这个优势）
+        length_norm = 1 - BM25_B + BM25_B * lengths.get(chunk["id"], 0) / average_length
         score = 0.0
+        max_idf = 0.0
         for token in query_tokens:
             count = token_counts.get(token, 0)
             if count == 0:
                 continue
-            df = document_frequency.get(token, 1)
-            idf = math.log((total_chunks + 1) / (df + 1)) + 1
-            score += count * idf
+            idf = _bm25_idf(document_frequency.get(token, 1), total_chunks)
+            max_idf = max(max_idf, idf)
+            score += idf * (count * (BM25_K1 + 1)) / (count + BM25_K1 * length_norm)
 
-        score += _phrase_boost(query, chunk["text"])
+        # 短语加权表达成「相当于多命中一个最强查询词」，而不是一个写死的大数。
+        # 原来固定 +100，而 TF-IDF 中位分只有 10.7，等于排序完全由这张手写表决定，
+        # 退化成规则匹配。现在它随语料规模自动缩放，也不会淹没 BM25 本身。
+        if _phrase_boost(query, chunk["text"]) > 0:
+            score += PHRASE_BOOST_WEIGHT * max_idf
 
         if score > 0:
             scored.append((score, chunk))

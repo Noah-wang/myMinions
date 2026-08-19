@@ -17,12 +17,12 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 WEB_DIR = ROOT_DIR / "web"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
+# 公开入口只读。running-video 和 feel 是纯写操作，直接不在白名单里；
+# kitchen 读写混在一个命令里，由 orchestrator 按动作拦截。
 WEB_COMMANDS = (
     "coros",
     "coros-tools",
     "running",
-    "running-video",
-    "feel",
     "feelings",
     "kitchen",
 )

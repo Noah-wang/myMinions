@@ -37,13 +37,19 @@ async def _running_ask(context: CommandContext, argument: str) -> None:
 
     await context.send("正在检索跑步书籍并生成回答...")
     try:
-        answer = await answer_running_question(question, context.conversation_id)
+        answer = await answer_running_question(
+            question, context.conversation_id, read_only=context.read_only
+        )
         await context.send_chunks(answer)
     except Exception as exc:
         await context.send(f"回答跑步问题失败：{exc}")
 
 
 async def _running_video(context: CommandContext, argument: str) -> None:
+    if context.read_only:
+        await context.send("这个入口是只读的，导入知识库请在 Discord 里操作。")
+        return
+
     video_input = argument.strip()
     if not video_input:
         await context.send("请提供 B站 BV号或视频链接。")
@@ -58,6 +64,10 @@ async def _running_video(context: CommandContext, argument: str) -> None:
 
 
 async def _record_feeling(context: CommandContext, argument: str) -> None:
+    if context.read_only:
+        await context.send("这个入口是只读的，记录感受请在 Discord 里操作。")
+        return
+
     result = await record_feeling(argument)
     await context.send(result)
 

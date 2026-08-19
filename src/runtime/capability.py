@@ -15,6 +15,9 @@ class CommandContext:
     send: SendText
     send_chunks: SendText
     conversation_id: str = "default"
+    # 公开的 Web 入口没有认证，只允许读。写操作（改长期记忆、记录感受、
+    # 导入知识库、改厨房库存）必须在能力层再拒一次，不能只依赖命令白名单。
+    read_only: bool = False
 
 
 @dataclass(frozen=True)

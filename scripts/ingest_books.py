@@ -286,8 +286,10 @@ def load_cached_vectors() -> dict[str, list[float]]:
     }
 
 
-async def write_embeddings(chunks: list[dict[str, Any]]) -> None:
-    """只对内容变化的子块调用 embedding API。
+async def build_embedding_payload(chunks: list[dict[str, Any]]) -> dict[str, Any]:
+    """只对内容变化的子块调用 embedding API，返回待写盘的 payload。
+
+    这里不直接写盘：四个索引文件要一起原子生效，写盘统一交给 main() 处理。
 
     切块本身是纯本地计算，每次全量重来无所谓，还顺带保证了删除传播：
     源文件没了就不会出现在 children 里，它的向量自然不会被写出去。
@@ -333,7 +335,7 @@ async def write_embeddings(chunks: list[dict[str, Any]]) -> None:
     if not pending_hashes:
         print("Nothing changed, no embedding API calls made")
 
-    payload = {
+    return {
         "model": get_embedding_model(),
         "chunk_count": len(chunks),
         "child_count": len(children),
@@ -347,9 +349,33 @@ async def write_embeddings(chunks: list[dict[str, Any]]) -> None:
             for child in children
         ],
     }
-    EMBEDDINGS_PATH.write_text(
-        json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+
+
+def stage(path: Path, text: str) -> tuple[Path, Path]:
+    """把内容写进同目录的临时文件，返回 (临时文件, 目标路径)。
+
+    此时还没有任何人能看到新内容，崩溃也只是留下一个 .tmp。
+    """
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    return tmp, path
+
+
+def commit(staged: list[tuple[Path, Path]]) -> None:
+    """把所有临时文件一次性改名就位。
+
+    同一文件系统内的 rename 是原子的：读的人要么看到完整的旧文件，
+    要么看到完整的新文件，不存在半截状态。
+    四个文件仍然是四次 rename，理论上还有个几微秒的窗口，
+    但相比"写 embeddings 要等几十秒 API"那个窗口已经不是一个量级。
+    """
+    for tmp, final in staged:
+        tmp.replace(final)
+
+
+def discard(staged: list[tuple[Path, Path]]) -> None:
+    for tmp, _ in staged:
+        tmp.unlink(missing_ok=True)
 
 
 def build_chunks() -> tuple[list[dict[str, Any]], dict[str, int]]:
@@ -401,46 +427,62 @@ def main() -> None:
         "tokens": {chunk["id"]: tokenize(chunk["text"]) for chunk in chunks},
     }
 
-    CHUNKS_PATH.write_text(
-        json.dumps(chunks, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
-    INDEX_PATH.write_text(
-        json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    build_info = {
+        # 把产生这份索引的配置一并写盘。没有它就没法发现
+        # "索引是用 700 建的，但代码默认值是 400" 这种漂移。
+        "built_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "chunk_count": len(chunks),
+        "sources": index["sources"],
+        "config": current_config(),
+    }
 
-    # 把产生这份索引的配置一并写盘。没有它就没法发现
-    # "索引是用 700 建的，但代码默认值是 400" 这种漂移。
-    BUILD_INFO_PATH.write_text(
-        json.dumps(
-            {
-                "built_at": datetime.now(UTC).isoformat(timespec="seconds"),
-                "chunk_count": len(chunks),
-                "sources": index["sources"],
-                "config": current_config(),
-            },
-            ensure_ascii=False,
-            indent=2,
+    # 四个索引文件必须一起生效。先全部写成 .tmp，最后一次性改名就位。
+    # 原来是顺序直接写，而 embeddings 要等几十秒的 API 调用才写得完，
+    # 这期间 chunks.json 已经是新的、embeddings.json 还是旧的——
+    # 中途崩溃（报错、Ctrl+C、断网）就会留下撕裂索引，
+    # 检索会静默降级到关键词兜底，回答变差但没有任何提示。
+    staged: list[tuple[Path, Path]] = []
+    try:
+        staged.append(
+            stage(CHUNKS_PATH, json.dumps(chunks, ensure_ascii=False, indent=2) + "\n")
         )
-        + "\n",
-        encoding="utf-8",
-    )
+        staged.append(
+            stage(INDEX_PATH, json.dumps(index, ensure_ascii=False, indent=2) + "\n")
+        )
+        staged.append(
+            stage(
+                BUILD_INFO_PATH,
+                json.dumps(build_info, ensure_ascii=False, indent=2) + "\n",
+            )
+        )
 
-    print(f"Wrote {len(chunks)} chunks to {CHUNKS_PATH}")
-    print(f"Build config: {current_config()}")
-    print(
-        "Dropped: "
-        f"empty={dropped['empty']} "
-        f"too_short={dropped['too_short']} "
-        f"boilerplate_lines={dropped['boilerplate_lines']}"
-    )
-    for source in index["sources"]:
-        print(f"- {source}")
+        print(f"Prepared {len(chunks)} chunks")
+        print(f"Build config: {current_config()}")
+        print(
+            "Dropped: "
+            f"empty={dropped['empty']} "
+            f"too_short={dropped['too_short']} "
+            f"boilerplate_lines={dropped['boilerplate_lines']}"
+        )
+        for source in index["sources"]:
+            print(f"- {source}")
 
-    if embedding_configured():
-        asyncio.run(write_embeddings(chunks))
-        print(f"Wrote embeddings to {EMBEDDINGS_PATH}")
-    else:
-        print("Skipped embeddings because EMBEDDING_API_KEY is not set.")
+        if embedding_configured():
+            payload = asyncio.run(build_embedding_payload(chunks))
+            staged.append(
+                stage(EMBEDDINGS_PATH, json.dumps(payload, ensure_ascii=False) + "\n")
+            )
+        else:
+            print("Skipped embeddings because EMBEDDING_API_KEY is not set.")
+
+        commit(staged)
+        print(f"Committed {len(staged)} index files to {KNOWLEDGE_DIR}")
+    except BaseException:
+        # BaseException 而不是 Exception：Ctrl+C 是最现实的中断方式之一，
+        # 它抛的 KeyboardInterrupt 不属于 Exception。
+        discard(staged)
+        print("Ingest failed, index left untouched")
+        raise
 
 
 if __name__ == "__main__":

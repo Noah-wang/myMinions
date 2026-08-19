@@ -315,15 +315,17 @@ INSPECT_INDEX_TOOL = Tool(
 )
 
 
-def build_running_registry() -> ToolRegistry:
-    return ToolRegistry(
-        (
-            TRAINING_PACES_TOOL,
-            RACE_COUNTDOWN_TOOL,
-            SAVE_PROFILE_TOOL,
-            INSPECT_INDEX_TOOL,
-        )
-    )
+def build_running_registry(read_only: bool = False) -> ToolRegistry:
+    """跑步教练的工具集。
+
+    read_only 用于公开的 Web 入口：那里没有认证，任何人都能对话，
+    所以不能把写长期档案的工具交出去——否则陌生人可以往档案里塞任意内容，
+    而这些内容之后会被当成用户说过的事实用于生成训练建议。
+    """
+    tools = [TRAINING_PACES_TOOL, RACE_COUNTDOWN_TOOL, INSPECT_INDEX_TOOL]
+    if not read_only:
+        tools.append(SAVE_PROFILE_TOOL)
+    return ToolRegistry(tuple(tools))
 
 
 def build_ingest_registry() -> ToolRegistry:

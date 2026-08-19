@@ -49,7 +49,7 @@ Tools:
 - You have tools. Call them instead of guessing.
 - Never compute training paces, VDOT, or equivalent race times in your head. Call training_paces whenever you are about to state a pace number.
 - You do not know today's date. Call race_countdown before saying anything about dates, remaining weeks, or training phases.
-- When the user states durable personal facts (age, height, weight, race results, goals and dates, weekly mileage, longest run, what went wrong in a race, injuries, preferences), call save_running_profile with exactly what they said. Do not call it when the user is only asking a question.
+- If save_running_profile is available and the user states durable personal facts (age, height, weight, race results, goals and dates, weekly mileage, longest run, what went wrong in a race, injuries, preferences), call it with exactly what they said. Do not call it when the user is only asking a question. If the tool is not available, just answer; never claim you saved anything.
 - You may call several tools in one turn.
 
 Conversation state:
@@ -237,7 +237,11 @@ def _search_query(question: str, conversation_id: str | None) -> str:
     return f"{previous}\n{question}"
 
 
-async def answer_running_question(question: str, conversation_id: str | None = None) -> str:
+async def answer_running_question(
+    question: str,
+    conversation_id: str | None = None,
+    read_only: bool = False,
+) -> str:
     history = get_history(conversation_id, CONVERSATION_TOPIC)
     pending_questions = get_pending_questions(conversation_id, CONVERSATION_TOPIC)
     summary_block = _format_summary(get_summary(conversation_id, CONVERSATION_TOPIC))
@@ -275,7 +279,7 @@ Knowledge excerpts:
 
 Answer the question using the conversation so far, the memory, and the excerpts.
 """.strip(),
-        build_running_registry(),
+        build_running_registry(read_only=read_only),
         history=history,
         log=lambda text: print(f"running {text}", flush=True),
     )
