@@ -7,4 +7,6 @@ data/.DS_Store
 agents/kitchen-assistant/config.toml
 agents/coros-report/config.toml
 data/knowledge/coros-report/videos/
+data/photo-memory/
+data/media/
 **/.secrets/

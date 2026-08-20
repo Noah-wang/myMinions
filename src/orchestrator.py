@@ -1,12 +1,18 @@
 import asyncio
 import os
+import tempfile
 from collections.abc import Awaitable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 from src.registry import CapabilityRegistry, get_registry
-from src.runtime.capability import CommandContext
-from src.runtime.conversation import RUNNING_COACH_TOPIC, get_pending_questions
+from src.runtime.capability import CommandContext, RuntimeAttachment
+from src.runtime.conversation import (
+    PHOTO_MEMORY_TOPIC,
+    RUNNING_COACH_TOPIC,
+    get_pending_questions,
+)
 from src.runtime.llm import complete_json
 
 
@@ -17,7 +23,7 @@ ROUTER_SYSTEM_PROMPT = """
 
 返回格式：
 {
-  "command": "coros | coros-tools | running | running-video | feel | feelings | kitchen | none",
+  "command": "coros | coros-tools | running | running-video | feel | feelings | kitchen | photo | discord-admin | none",
   "argument": "传给命令的参数",
   "confidence": 0.0,
   "reason": "一句很短的原因"
@@ -48,7 +54,15 @@ ROUTER_SYSTEM_PROMPT = """
   - pantry
   - today
   - expiring
+- command = "photo" 时，argument 保留用户原话。照片能力内部会自己做意图识别，
+  判断是新建一组、追加到已有分组、补充元数据还是检索，这里不要替它决定。
+- command = "discord-admin" 时，argument 保留用户原话，只用于 Discord 服务器管理。
+  目前只支持修改服务器头像/图标。普通频道没有独立头像，不要把频道图片请求路由到这里。
 """.strip()
+
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_SERVER_ICON_PATH = ROOT_DIR / "assets" / "brand" / "discord-bot-avatar.png"
 
 
 class MessageChannel(Protocol):
@@ -77,7 +91,11 @@ class MainAgentOrchestrator:
 
     def describe_capabilities(self) -> str:
         """获取当前所有已加载功能的文本描述。"""
-        return self._registry.describe()
+        return (
+            f"{self._registry.describe()}\n"
+            "- main-agent: 主 Agent 内置工具\n"
+            "  !discord-admin - 修改 Discord 服务器设置（目前支持服务器头像）"
+        )
 
     def run_startup_handlers(self, client: object) -> None:
         """在系统启动时，唤醒并执行所有已注册功能的初始化回调。
@@ -96,6 +114,9 @@ class MainAgentOrchestrator:
             channel_id: Discord 频道 ID。
             command_name: 指令名称。
         """
+        if command_name in {"discord-admin", "discord"}:
+            return self._is_allowed_discord_admin_channel(channel_id)
+
         channel_env_name = self._registry.channel_env_for_command(command_name)
         if channel_env_name is None:
             return True
@@ -107,6 +128,10 @@ class MainAgentOrchestrator:
         Args:
             channel_id: Discord 频道 ID。
         """
+        admin_channel = os.getenv("DISCORD_ADMIN_CHANNEL_ID")
+        if admin_channel is not None and str(channel_id) == admin_channel:
+            return True
+
         for env_name in self._registry.channel_env_names():
             if self._is_allowed_channel(channel_id, env_name):
                 return True
@@ -118,6 +143,8 @@ class MainAgentOrchestrator:
         channel: MessageChannel,
         command_name: str,
         argument: str = "",
+        attachments: tuple[RuntimeAttachment, ...] = (),
+        message: object | None = None,
     ) -> bool:
         """将已解析的指令直接分发给注册表中的具体 Agent 处理。
 
@@ -130,9 +157,30 @@ class MainAgentOrchestrator:
         if not self.is_allowed_for_command(channel.id, command_name):
             return True
 
+        if command_name in {"discord-admin", "discord"}:
+            try:
+                await self._handle_discord_admin(
+                    self._command_context(
+                        client,
+                        channel,
+                        attachments=attachments,
+                        message=message,
+                    ),
+                    argument,
+                )
+            except Exception as exc:
+                await self._send_error(channel, "执行 `discord-admin` 失败", exc)
+                self._log(f"discord_admin_failed error={exc}")
+            return True
+
         try:
             return await self._registry.dispatch_command(
-                self._command_context(client, channel),
+                self._command_context(
+                    client,
+                    channel,
+                    attachments=attachments,
+                    message=message,
+                ),
                 command_name,
                 argument,
             )
@@ -146,6 +194,8 @@ class MainAgentOrchestrator:
         client: object,
         channel: MessageChannel,
         content: str,
+        attachments: tuple[RuntimeAttachment, ...] = (),
+        message: object | None = None,
     ) -> bool:
         """接收 Discord 聊天框中的普通文本并进行分发。
 
@@ -167,13 +217,28 @@ class MainAgentOrchestrator:
             return True
 
         if stripped.startswith("!"):
-            command_name = stripped[1:].partition(" ")[0]
+            command_name, _, argument = stripped[1:].partition(" ")
             if not self.is_allowed_for_command(channel.id, command_name):
                 return True
 
+            if command_name in {"discord-admin", "discord"}:
+                return await self.dispatch_command(
+                    client,
+                    channel,
+                    command_name,
+                    argument.strip(),
+                    attachments,
+                    message,
+                )
+
             try:
                 return await self._registry.dispatch_text(
-                    self._command_context(client, channel),
+                    self._command_context(
+                        client,
+                        channel,
+                        attachments=attachments,
+                        message=message,
+                    ),
                     stripped,
                 )
             except Exception as exc:
@@ -181,11 +246,57 @@ class MainAgentOrchestrator:
                 self._log(f"text_command_failed command={command_name} error={exc}")
                 return True
 
+        if (
+            self.is_allowed_for_command(channel.id, "discord-admin")
+            and any(attachment.is_image for attachment in attachments)
+            and self._looks_like_discord_admin_request(stripped)
+        ):
+            self._log(f"attachment_dispatch channel_id={channel.id} command=discord-admin")
+            return await self.dispatch_command(
+                client,
+                channel,
+                "discord-admin",
+                stripped,
+                attachments,
+                message,
+            )
+
+        # 只拦图片。原来是「有任何附件就当存照片」，
+        # 结果在跑步频道贴张截图或传个 PDF 都会被照片能力接走。
+        if self.is_allowed_for_command(channel.id, "photo") and any(
+            attachment.is_image for attachment in attachments
+        ):
+            self._log(f"attachment_dispatch channel_id={channel.id} command=photo")
+            # 原文交给照片能力，由它做意图识别。
+            # 这里原来写死 store，等于把「再加上这张」和「这是新的一场比赛」
+            # 当成同一件事，用户想追加到已有分组的意图从头到尾没人看。
+            return await self.dispatch_command(
+                client,
+                channel,
+                "photo",
+                stripped,
+                attachments,
+                message,
+            )
+
+        if self.is_allowed_for_command(
+            channel.id, "photo"
+        ) and self._has_pending_photo_questions(channel, stripped):
+            self._log(f"pending_photo_dispatch channel_id={channel.id} command=photo")
+            return await self.dispatch_command(
+                client,
+                channel,
+                "photo",
+                stripped,
+                attachments,
+                message,
+            )
+
         if self.is_allowed_for_command(
             channel.id, "running"
         ) and self._has_pending_running_questions(channel, stripped):
             self._log(f"pending_answer_dispatch channel_id={channel.id} command=running")
-            return await self.dispatch_command(client, channel, "running", stripped)
+            return await self.dispatch_command(client, channel, "running", stripped, message=message)
 
         try:
             route = await self._route_natural_language(channel.id, stripped)
@@ -204,6 +315,8 @@ class MainAgentOrchestrator:
                 channel,
                 route.command_name,
                 route.argument,
+                attachments,
+                message,
             )
 
         if self.is_capabilities_channel(channel.id):
@@ -213,7 +326,9 @@ class MainAgentOrchestrator:
                 "!running <问题>：基于跑步知识库回答\n"
                 "!running-video <B站BV号或链接>：导入跑步视频知识\n"
                 "!feel <感受>：记录运动感受\n"
-                "!feelings：查看最近感受记录"
+                "!feelings：查看最近感受记录\n"
+                "!photo search <关键词>：检索并发送照片\n"
+                "!discord-admin 把服务器头像改成这张：修改服务器头像"
             )
             self._log(f"natural_language_no_route channel_id={channel.id}")
             return True
@@ -287,6 +402,13 @@ class MainAgentOrchestrator:
             )
             return NaturalLanguageRoute("running", stripped, 1.0, "pending answer")
 
+        if "photo" in allowed_commands and self._has_pending_photo_questions(
+            channel, stripped
+        ):
+            self._log("web_pending_photo_rejected")
+            await channel.send("网页入口不开放照片库。请在 Discord 里补充照片信息。")
+            return None
+
         try:
             route = await self._route_natural_language_from_allowed(
                 -1,
@@ -330,6 +452,131 @@ class MainAgentOrchestrator:
             self._log(f"web_command_failed command={route.command_name} error={exc}")
         return route
 
+    async def _handle_discord_admin(
+        self,
+        context: CommandContext,
+        argument: str,
+    ) -> None:
+        """主 Agent 内置 Discord 管理工具。
+
+        这类操作不是业务 subagent 能力，而是宿主聊天环境的管理动作。
+        所以放在 orchestrator 里，并且每次执行都做频道、用户权限和 bot 权限检查。
+        """
+        if context.read_only:
+            await context.send("网页入口不支持 Discord 管理操作。")
+            return
+
+        if self._discord_admin_action(argument) != "server_icon":
+            await context.send(
+                "我现在只支持修改 Discord 服务器头像。\n"
+                "用法：发一张图片并说「把服务器头像改成这张」。\n"
+                "也可以说「把服务器头像改成素材库那个奖牌图」。"
+            )
+            return
+
+        guild = self._message_guild(context)
+        if guild is None:
+            await context.send("这个操作只能在 Discord 服务器频道里使用。")
+            return
+
+        author = getattr(context.message, "author", None)
+        if author is None:
+            await context.send("我拿不到这条消息的发送者，不能执行服务器管理操作。")
+            return
+
+        if not self._is_discord_admin_user(author):
+            await context.send("你需要拥有「管理服务器」权限，才能让我修改服务器头像。")
+            return
+
+        bot_member = self._bot_guild_member(context, guild)
+        if bot_member is None or not self._member_can_manage_guild(bot_member):
+            await context.send("我还没有「管理服务器」权限，不能修改服务器头像。")
+            return
+
+        icon_bytes = await self._server_icon_bytes(context)
+        await guild.edit(
+            icon=icon_bytes,
+            reason=f"Requested by {getattr(author, 'name', 'user')} via AgentDeck",
+        )
+        await context.send("已把服务器头像改好了。")
+
+    async def _server_icon_bytes(self, context: CommandContext) -> bytes:
+        image_attachment = next(
+            (attachment for attachment in context.attachments if attachment.is_image),
+            None,
+        )
+        if image_attachment is None:
+            if not DEFAULT_SERVER_ICON_PATH.exists():
+                raise RuntimeError("没有收到图片，素材库里也没有默认服务器头像。")
+            return DEFAULT_SERVER_ICON_PATH.read_bytes()
+
+        if image_attachment.size > 8 * 1024 * 1024:
+            raise RuntimeError("图片太大了，请换一张 8MB 以内的图片。")
+
+        suffix = Path(image_attachment.filename).suffix or ".png"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            target = Path(tmp_dir) / f"server-icon{suffix}"
+            await image_attachment.save(target)
+            return target.read_bytes()
+
+    def _message_guild(self, context: CommandContext) -> object | None:
+        message_guild = getattr(context.message, "guild", None)
+        if message_guild is not None:
+            return message_guild
+        return getattr(context.channel, "guild", None)
+
+    def _bot_guild_member(self, context: CommandContext, guild: object) -> object | None:
+        member = getattr(guild, "me", None)
+        if member is not None:
+            return member
+        client_user = getattr(context.client, "user", None)
+        user_id = getattr(client_user, "id", None)
+        getter = getattr(guild, "get_member", None)
+        if callable(getter) and user_id is not None:
+            return getter(user_id)
+        return None
+
+    def _is_discord_admin_user(self, author: object) -> bool:
+        configured_ids = {
+            item.strip()
+            for item in os.getenv("DISCORD_ADMIN_USER_IDS", "").split(",")
+            if item.strip()
+        }
+        author_id = str(getattr(author, "id", ""))
+        if configured_ids and author_id not in configured_ids:
+            return False
+        return self._member_can_manage_guild(author)
+
+    def _member_can_manage_guild(self, member: object) -> bool:
+        permissions = getattr(member, "guild_permissions", None)
+        return bool(
+            getattr(permissions, "administrator", False)
+            or getattr(permissions, "manage_guild", False)
+        )
+
+    def _looks_like_discord_admin_request(self, content: str) -> bool:
+        return self._discord_admin_action(content) is not None
+
+    def _discord_admin_action(self, content: str) -> str | None:
+        text = content.strip().lower()
+        if not text:
+            return None
+        server_terms = (
+            "服务器头像",
+            "服务器图标",
+            "服务器图片",
+            "server icon",
+            "guild icon",
+        )
+        action_terms = ("改", "换", "设置", "设成", "改成", "update", "set", "change")
+        if any(term in text for term in server_terms) and any(
+            term in text for term in action_terms
+        ):
+            return "server_icon"
+        if text.partition(" ")[0] in {"set-server-icon", "server-icon"}:
+            return "server_icon"
+        return None
+
     def _has_pending_running_questions(self, channel: MessageChannel, content: str) -> bool:
         """判断这条消息是不是在回答跑步教练上一轮的追问。
 
@@ -344,6 +591,13 @@ class MainAgentOrchestrator:
             return False
         return bool(
             get_pending_questions(self._conversation_id(channel), RUNNING_COACH_TOPIC)
+        )
+
+    def _has_pending_photo_questions(self, channel: MessageChannel, content: str) -> bool:
+        if not content:
+            return False
+        return bool(
+            get_pending_questions(self._conversation_id(channel), PHOTO_MEMORY_TOPIC)
         )
 
     async def _route_natural_language(
@@ -416,6 +670,8 @@ class MainAgentOrchestrator:
             "feel",
             "feelings",
             "kitchen",
+            "photo",
+            "discord-admin",
         ):
             if self.is_allowed_for_command(channel_id, command_name):
                 commands.append(command_name)
@@ -438,6 +694,8 @@ class MainAgentOrchestrator:
             "feel": "记录运动后的主观感受，例如 RPE、腿沉、酸痛、疲劳。",
             "feelings": "查看最近记录的运动感受。",
             "kitchen": "处理厨房助手：B站菜谱、采购清单、库存、消耗、过期和今日推荐。",
+            "photo": "处理照片记忆：保存 Discord 上传的图片附件，或按事件、地点、比赛名检索并发送照片。",
+            "discord-admin": "主 Agent 的 Discord 管理工具：修改服务器头像或图标。",
         }
         allowed_text = "\n".join(
             f"- {name}: {command_descriptions[name]}" for name in allowed_commands
@@ -491,6 +749,14 @@ User message:
             argument = ""
 
         if command_name == "kitchen" and not self._valid_kitchen_argument(argument):
+            return None
+
+        if command_name == "photo" and not self._valid_photo_argument(argument):
+            return None
+
+        if command_name == "discord-admin" and not self._valid_discord_admin_argument(
+            argument
+        ):
             return None
 
         reason = route.get("reason")
@@ -552,6 +818,14 @@ User message:
             return bool(rest.strip())
         return False
 
+    def _valid_photo_argument(self, argument: str) -> bool:
+        """照片命令收原话即可，意图由能力层判断。
+
+        原来要求必须是 store/search/update 前缀，等于让路由器替照片能力
+        决定动作，而它既看不到现有分组也看不到附件，判断不了追加还是新建。
+        """
+        return bool(argument.strip())
+
     # kitchen 把读和写混在同一个命令里，所以只读入口要按动作拦。
     READ_ONLY_KITCHEN_ACTIONS = {"recipes", "shopping", "pantry", "today", "expiring"}
 
@@ -562,6 +836,10 @@ User message:
         if command_name == "kitchen":
             action = argument.strip().partition(" ")[0]
             return action in self.READ_ONLY_KITCHEN_ACTIONS
+        if command_name == "photo":
+            return False
+        if command_name == "discord-admin":
+            return False
         return True
 
     def _valid_running_video_argument(self, argument: str) -> bool:
@@ -575,6 +853,21 @@ User message:
         configured_id = os.getenv(env_name)
         return configured_id is not None and str(channel_id) == configured_id
 
+    def _is_allowed_discord_admin_channel(self, channel_id: int) -> bool:
+        """Discord 管理工具默认只在主 Agent 频道可用。
+
+        如果设置了 DISCORD_ADMIN_CHANNEL_ID，则优先使用专门的管理频道。
+        没设置时退回 DISCORD_RUNNING_CHANNEL_ID，方便个人服务器先快速使用。
+        """
+        admin_channel_id = os.getenv("DISCORD_ADMIN_CHANNEL_ID")
+        if admin_channel_id:
+            return str(channel_id) == admin_channel_id
+        return self._is_allowed_channel(channel_id, "DISCORD_RUNNING_CHANNEL_ID")
+
+    def _valid_discord_admin_argument(self, argument: str) -> bool:
+        """主 Agent 只接受明确的服务器头像修改请求。"""
+        return self._discord_admin_action(argument) is not None
+
     def _log(self, message: str) -> None:
         """输出编排器运行的调试和状态日志。"""
         print(f"orchestrator {message}", flush=True)
@@ -584,6 +877,8 @@ User message:
         client: object,
         channel: MessageChannel,
         read_only: bool = False,
+        attachments: tuple[RuntimeAttachment, ...] = (),
+        message: object | None = None,
     ) -> CommandContext:
         """构造 Agent 执行指令时所需的上下文对象（包括发送文本及分片发送方法）。
 
@@ -601,8 +896,10 @@ User message:
             channel=channel,
             send=send_text,
             send_chunks=send_chunks,
+            message=message,
             conversation_id=self._conversation_id(channel),
             read_only=read_only,
+            attachments=attachments,
         )
 
     def _conversation_id(self, channel: MessageChannel) -> str:

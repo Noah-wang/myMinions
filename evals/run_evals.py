@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT_DIR))
 sys.path.insert(0, str(ROOT_DIR / "evals" / "judges"))
 sys.path.insert(0, str(ROOT_DIR / "agents" / "kitchen-assistant" / "agent"))
 sys.path.insert(0, str(ROOT_DIR / "agents" / "coros-report" / "agent"))
+sys.path.insert(0, str(ROOT_DIR / "agents" / "photo-memory" / "agent"))
 
 from natural_language_routing import (  # noqa: E402
     CaseResult,
@@ -64,6 +65,30 @@ def run_rag_retrieval_suite() -> tuple[dict[str, float], list[Any], dict[str, An
     return metrics, case_results, spec, ""
 
 
+def run_photo_memory_suite() -> tuple[dict[str, float], list[Any], dict[str, Any]]:
+    """纯函数评测，不需要索引也不需要外部服务，任何环境都能跑。"""
+    import photo_memory
+
+    spec = _load_json(ROOT_DIR / "evals" / "specs" / "photo_memory.json")
+    dataset = _load_json(ROOT_DIR / spec["dataset"])
+
+    extraction = [photo_memory.judge_extraction(case) for case in dataset["extraction"]]
+    search = [
+        photo_memory.judge_search(case, dataset["fixtures"])
+        for case in dataset["search"]
+    ]
+    merge = [
+        photo_memory.judge_merge(case, dataset["fixtures"])
+        for case in dataset.get("merge", [])
+    ]
+    intent_guard = [
+        photo_memory.judge_intent_guard(case, dataset["fixtures"])
+        for case in dataset.get("intent_guard", [])
+    ]
+    metrics = photo_memory.score_results(extraction, search, merge, intent_guard)
+    return metrics, extraction + search + merge + intent_guard, spec
+
+
 def _metric_threshold(spec: dict[str, Any], metric_name: str) -> float:
     return float(spec["metrics"][metric_name]["threshold"])
 
@@ -99,6 +124,13 @@ def _print_suite_result(
 def main() -> None:
     metrics, case_results, spec = run_natural_language_routing_suite()
     passed = _print_suite_result("natural_language_routing", metrics, case_results, spec)
+
+    print()
+    photo_metrics, photo_results, photo_spec = run_photo_memory_suite()
+    passed = (
+        _print_suite_result("photo_memory", photo_metrics, photo_results, photo_spec)
+        and passed
+    )
 
     print()
     rag_metrics, rag_results, rag_spec, skip_reason = run_rag_retrieval_suite()

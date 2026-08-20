@@ -420,6 +420,7 @@ def _ensure_agent_paths() -> None:
         ROOT_DIR,
         ROOT_DIR / "agents" / "kitchen-assistant" / "agent",
         ROOT_DIR / "agents" / "coros-report" / "agent",
+        ROOT_DIR / "agents" / "photo-memory" / "agent",
     )
     for path in paths:
         value = str(path)

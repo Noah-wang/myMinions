@@ -4,6 +4,7 @@ import discord
 from discord import app_commands
 
 from src.orchestrator import get_orchestrator
+from src.runtime.capability import RuntimeAttachment
 
 
 # 拿本地变量
@@ -12,6 +13,24 @@ def _required_env(name: str) -> str:
     if not value:
         raise RuntimeError(f"{name} is missing. Add it to .env.")
     return value
+
+
+def _runtime_attachments(message: discord.Message) -> tuple[RuntimeAttachment, ...]:
+    attachments: list[RuntimeAttachment] = []
+    for item in message.attachments:
+        async def save(target, attachment=item) -> None:
+            await attachment.save(target)
+
+        attachments.append(
+            RuntimeAttachment(
+                filename=item.filename,
+                content_type=item.content_type,
+                url=item.url,
+                size=item.size,
+                save=save,
+            )
+        )
+    return tuple(attachments)
 
 
 async def _dispatch_interaction_command(
@@ -302,12 +321,16 @@ def create_discord_client() -> discord.Client:
                         client,
                         message.channel,
                         message.content,
+                        _runtime_attachments(message),
+                        message,
                     )
             else:
                 await orchestrator.dispatch_text(
                     client,
                     message.channel,
                     message.content,
+                    _runtime_attachments(message),
+                    message,
                 )
         except Exception as exc:
             error_text = str(exc).strip() or exc.__class__.__name__

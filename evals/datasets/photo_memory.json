@@ -1,0 +1,422 @@
+{
+  "extraction": [
+    {
+      "id": "real_chinese_duration",
+      "text": "比赛成绩是四小时三十分48 比赛日期是2026年3月8日",
+      "expect": {
+        "race_date": "2026-03-08",
+        "result": "4:30:48"
+      },
+      "note": "真实回归：用户在 Discord 实际发的内容，原实现两项都抽不出成绩"
+    },
+    {
+      "id": "real_colon_with_connector",
+      "text": "比赛成绩是4:30:48",
+      "expect": {
+        "race_date": "",
+        "result": "4:30:48"
+      },
+      "note": "真实回归：关键词和数字之间的「是」原来会把正则挡住"
+    },
+    {
+      "id": "store_with_all_fields",
+      "text": "这是我洛杉矶马拉松的比赛照片，2026年3月17日，成绩 4:30:00",
+      "expect": {
+        "event": "洛杉矶马拉松",
+        "race_date": "2026-03-17",
+        "result": "4:30:00"
+      }
+    },
+    {
+      "id": "event_with_verb_prefix",
+      "text": "帮我存一下柏林马拉松的照片",
+      "expect": {
+        "event": "柏林马拉松"
+      },
+      "note": "回归：原实现会把「帮我存一下」也当成赛事名的一部分"
+    },
+    {
+      "id": "event_half_marathon",
+      "text": "这是我上海半马的照片",
+      "expect": {
+        "event": "上海半马"
+      }
+    },
+    {
+      "id": "event_la_english",
+      "text": "This is my LA Marathon photo",
+      "expect": {
+        "event": "洛杉矶马拉松"
+      }
+    },
+    {
+      "id": "event_unknown",
+      "text": "随便一张自拍",
+      "expect": {
+        "event": "未命名照片",
+        "race_date": "",
+        "result": ""
+      }
+    },
+    {
+      "id": "duration_digits_with_seconds",
+      "text": "4小时30分48秒",
+      "expect": {
+        "result": "4:30:48"
+      }
+    },
+    {
+      "id": "duration_no_seconds",
+      "text": "用时四小时三十分",
+      "expect": {
+        "result": "4:30:00"
+      }
+    },
+    {
+      "id": "duration_zero_filler",
+      "text": "成绩是十小时零五分",
+      "expect": {
+        "result": "10:05:00"
+      },
+      "note": "「零五」这类补位写法"
+    },
+    {
+      "id": "pace_not_a_result",
+      "text": "我半马配速是 4:30",
+      "expect": {
+        "result": ""
+      },
+      "note": "没有成绩类关键词，不能把配速当成绩"
+    },
+    {
+      "id": "date_not_a_result",
+      "text": "比赛日期是2026年3月8日",
+      "expect": {
+        "race_date": "2026-03-08",
+        "result": ""
+      },
+      "note": "日期不能被当成成绩"
+    },
+    {
+      "id": "month_only_date",
+      "text": "这是我东京马拉松的照片，2025年3月",
+      "expect": {
+        "event": "东京马拉松",
+        "race_date": "2025-03"
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "fx-la",
+      "event": "洛杉矶马拉松",
+      "caption": "这是我洛杉矶马拉松的比赛照片",
+      "tags": [
+        "洛杉矶马拉松"
+      ],
+      "race_date": "2026-03-08",
+      "result": "4:30:48",
+      "files": [
+        {
+          "path": "data/media/fx-la/01.jpg"
+        },
+        {
+          "path": "data/media/fx-la/02.jpg"
+        },
+        {
+          "path": "data/media/fx-la/03.jpg"
+        },
+        {
+          "path": "data/media/fx-la/04.jpg"
+        },
+        {
+          "path": "data/media/fx-la/05.jpg"
+        },
+        {
+          "path": "data/media/fx-la/06.jpg"
+        },
+        {
+          "path": "data/media/fx-la/07.jpg"
+        },
+        {
+          "path": "data/media/fx-la/08.jpg"
+        }
+      ]
+    },
+    {
+      "id": "fx-tokyo",
+      "event": "东京马拉松",
+      "caption": "这是我东京马拉松的比赛照片",
+      "tags": [
+        "东京马拉松"
+      ],
+      "race_date": "2025-03-02",
+      "result": "3:55:00",
+      "files": [
+        {
+          "path": "data/media/fx-tokyo/01.jpg"
+        },
+        {
+          "path": "data/media/fx-tokyo/02.jpg"
+        },
+        {
+          "path": "data/media/fx-tokyo/03.jpg"
+        },
+        {
+          "path": "data/media/fx-tokyo/04.jpg"
+        },
+        {
+          "path": "data/media/fx-tokyo/05.jpg"
+        }
+      ]
+    },
+    {
+      "id": "fx-shanghai",
+      "event": "上海半马",
+      "caption": "这是我上海半马的照片",
+      "tags": [
+        "上海半马"
+      ],
+      "race_date": "2025-11-10",
+      "result": "1:40:00",
+      "files": [
+        {
+          "path": "data/media/fx-shanghai/01.jpg"
+        },
+        {
+          "path": "data/media/fx-shanghai/02.jpg"
+        },
+        {
+          "path": "data/media/fx-shanghai/03.jpg"
+        }
+      ]
+    },
+    {
+      "id": "fx-orphan",
+      "event": "未命名照片",
+      "caption": "再加上这张奖牌的照片",
+      "tags": [],
+      "race_date": "",
+      "result": "",
+      "files": [
+        {
+          "path": "data/media/fx-orphan/01.jpg"
+        }
+      ]
+    }
+  ],
+  "search": [
+    {
+      "id": "specific_event_name",
+      "query": "洛杉矶马拉松",
+      "expect_events": [
+        "洛杉矶马拉松"
+      ],
+      "note": "回归：原实现是纯 OR 匹配，这个查询会返回全部三组"
+    },
+    {
+      "id": "city_only",
+      "query": "东京",
+      "expect_events": [
+        "东京马拉松"
+      ]
+    },
+    {
+      "id": "city_prefix",
+      "query": "洛杉矶",
+      "expect_events": [
+        "洛杉矶马拉松"
+      ]
+    },
+    {
+      "id": "half_marathon",
+      "query": "半马",
+      "expect_events": [
+        "上海半马"
+      ]
+    },
+    {
+      "id": "no_match",
+      "query": "北京马拉松",
+      "expect_events": []
+    },
+    {
+      "id": "by_year",
+      "query": "2025",
+      "expect_events": [
+        "东京马拉松",
+        "上海半马"
+      ]
+    },
+    {
+      "id": "empty_query",
+      "query": "",
+      "expect_events": []
+    }
+  ],
+  "merge": [
+    {
+      "id": "merge_orphan_into_group",
+      "source": "fx-orphan",
+      "target": "fx-la",
+      "expect_groups": [
+        "洛杉矶马拉松",
+        "东京马拉松",
+        "上海半马"
+      ],
+      "expect_target_photos": 9,
+      "note": "真实场景：意图识别之前「再加上这张」被当成新建，同一场比赛被拆成两组"
+    },
+    {
+      "id": "merge_fills_missing_meta",
+      "source": "fx-la",
+      "target": "fx-orphan",
+      "expect_groups": [
+        "未命名照片",
+        "东京马拉松",
+        "上海半马"
+      ],
+      "expect_target_photos": 9,
+      "expect_target_result": "4:30:48",
+      "note": "目标缺的字段用来源补上"
+    },
+    {
+      "id": "merge_same_group_rejected",
+      "source": "fx-la",
+      "target": "fx-la",
+      "expect_groups": [
+        "洛杉矶马拉松",
+        "东京马拉松",
+        "上海半马",
+        "未命名照片"
+      ],
+      "expect_error": true,
+      "note": "同一组不能自己合自己"
+    },
+    {
+      "id": "merge_unknown_rejected",
+      "source": "fx-nope",
+      "target": "fx-la",
+      "expect_groups": [
+        "洛杉矶马拉松",
+        "东京马拉松",
+        "上海半马",
+        "未命名照片"
+      ],
+      "expect_error": true
+    }
+  ],
+  "intent_guard": [
+    {
+      "id": "match_ids_unknown_dropped",
+      "raw": {
+        "action": "search",
+        "match_ids": [
+          "fx-la",
+          "fx-nope",
+          "fx-la"
+        ]
+      },
+      "has_attachments": false,
+      "expect": {
+        "action": "search",
+        "match_ids": [
+          "fx-la"
+        ]
+      },
+      "note": "模型编出来的 id 要丢掉，重复的要去重"
+    },
+    {
+      "id": "match_ids_only_for_search",
+      "raw": {
+        "action": "update",
+        "target_id": "fx-la",
+        "match_ids": [
+          "fx-tokyo"
+        ]
+      },
+      "has_attachments": false,
+      "expect": {
+        "action": "update",
+        "match_ids": []
+      },
+      "note": "非搜索动作不该带 match_ids"
+    },
+    {
+      "id": "merge_needs_both_ids",
+      "raw": {
+        "action": "merge",
+        "target_id": "fx-la",
+        "source_id": ""
+      },
+      "has_attachments": false,
+      "expect": {
+        "action": "help",
+        "source_id": ""
+      },
+      "note": "只指定一组就不敢合并——删错组不可逆"
+    },
+    {
+      "id": "merge_rejects_self",
+      "raw": {
+        "action": "merge",
+        "target_id": "fx-la",
+        "source_id": "fx-la"
+      },
+      "has_attachments": false,
+      "expect": {
+        "action": "help",
+        "source_id": ""
+      }
+    },
+    {
+      "id": "attachments_cannot_merge",
+      "raw": {
+        "action": "merge",
+        "target_id": "fx-la",
+        "source_id": "fx-tokyo"
+      },
+      "has_attachments": true,
+      "expect": {
+        "action": "create",
+        "source_id": ""
+      },
+      "note": "带图不可能是合并"
+    },
+    {
+      "id": "no_attachments_cannot_create",
+      "raw": {
+        "action": "create"
+      },
+      "has_attachments": false,
+      "expect": {
+        "action": "search"
+      },
+      "note": "没有附件不可能新建"
+    },
+    {
+      "id": "append_without_target_degrades",
+      "raw": {
+        "action": "append",
+        "target_id": "fx-nope"
+      },
+      "has_attachments": true,
+      "expect": {
+        "action": "create",
+        "target_id": ""
+      },
+      "note": "追加目标不存在就降级成新建，不能凭空追加"
+    },
+    {
+      "id": "invalid_action_rejected",
+      "raw": {
+        "action": "delete_everything"
+      },
+      "has_attachments": false,
+      "expect": {
+        "action": "help"
+      },
+      "note": "词表外的动作一律作废"
+    }
+  ]
+}

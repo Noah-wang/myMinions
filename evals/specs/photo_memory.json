@@ -1,0 +1,46 @@
+{
+  "name": "photo_memory",
+  "version": "1.0.0",
+  "objective": "Guard the pure functions behind the race-photo feature: metadata extraction from free-form Chinese text, and photo search precision.",
+  "unit_under_test": "agents/photo-memory/agent/photo_store.py, agents/photo-memory/agent/photo_intent.py",
+  "dataset": "evals/datasets/photo_memory.json",
+  "judge": "evals/judges/photo_memory.py",
+  "metrics": {
+    "extraction_accuracy": {
+      "description": "Fraction of extraction cases where every field the case declares matches exactly. Covers event name, race date and finish time.",
+      "threshold": 1.0
+    },
+    "search_exact_match": {
+      "description": "Fraction of search cases where the returned set of events equals the expected set. This now guards the FALLBACK path only: live search asks the model to pick group ids directly. Kept because the fallback is what runs whenever the model is unavailable.",
+      "threshold": 1.0
+    },
+    "merge_correctness": {
+      "description": "Fraction of merge cases where the resulting groups, the target's photo count, and the total photo count across all groups all match. Total count is the key invariant: merging deletes a whole group, so losing a photo must fail loudly.",
+      "threshold": 1.0
+    },
+    "intent_guard_accuracy": {
+      "description": "Fraction of intent-sanitization cases where the over-reach guards produce the expected action and ids. The model can emit anything; this layer is what stops it from merging groups it was not told to merge or citing photo ids that do not exist.",
+      "threshold": 1.0
+    }
+  },
+  "constraints": [
+    "Pure functions only: no embedding, no LLM, no network. This suite runs anywhere and never needs to be skipped.",
+    "Search runs against fixtures in the dataset, not the live photos.json, so results stay reproducible as the user stores more photos.",
+    "Extraction cases only assert the fields they declare, so a case about finish time does not need to also pin down the event name.",
+    "Thresholds are 1.0 because these are deterministic pure functions, not a ranking system: any failure is a real defect, not noise.",
+    "Merge cases assert total photo count is unchanged, not just that the groups look right: the whole point of the guard is that a merge must never lose a photo.",
+    "Intent-guard cases feed hand-built model output straight into _sanitize, so they need no LLM: the point is to test the guard, not the model."
+  ],
+  "baseline": {
+    "measured_at": "2026-08-20",
+    "extraction_cases": 13,
+    "search_cases": 7,
+    "extraction_accuracy": 1.0,
+    "search_exact_match": 1.0,
+    "note": "建立时同时锁住三个刚修复的缺陷：成绩抽取认不出「成绩是4:30:48」和中文数字、赛事名把「帮我存一下」吞进去、搜索用纯 OR 匹配导致任何含「马拉松」的查询返回全部照片。",
+    "merge_cases": 4,
+    "merge_correctness": 1.0,
+    "intent_guard_cases": 8,
+    "intent_guard_accuracy": 1.0
+  }
+}

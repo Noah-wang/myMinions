@@ -7,6 +7,7 @@ from src.runtime.llm import complete_text
 
 
 RUNNING_COACH_TOPIC = "running-coach"
+PHOTO_MEMORY_TOPIC = "photo-memory"
 
 MAX_TURNS = 6
 MAX_MESSAGE_CHARS = 1200

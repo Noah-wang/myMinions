@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1536 1536" width="1536" height="1536">
+  <defs>
+    <clipPath id="body">
+      <circle cx="650" cy="1170" r="640"/>
+    </clipPath>
+    <radialGradient id="lift" cx="36%" cy="26%" r="80%">
+      <stop offset="0%" stop-color="#FF7B59"/>
+      <stop offset="100%" stop-color="#FA6440"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1536" height="1536" fill="#FFF3E6"/>
+
+  <circle cx="650" cy="1170" r="640" fill="url(#lift)"/>
+
+  <path d="M -40 745 Q 650 628 1600 742 L 1600 902 Q 650 788 -40 905 Z"
+        fill="#16233D" clip-path="url(#body)"/>
+
+  <ellipse cx="470" cy="1136" rx="70" ry="84" fill="#16233D"/>
+  <ellipse cx="828" cy="1136" rx="70" ry="84" fill="#16233D"/>
+
+  <ellipse cx="649" cy="1310" rx="52" ry="34" fill="#16233D"/>
+</svg>
