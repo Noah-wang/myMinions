@@ -9,6 +9,7 @@ export function escapeHtml(value) {
 
 function renderInline(text) {
   return text
+    .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '<img class="inline-image" src="$2" alt="$1">')
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 }

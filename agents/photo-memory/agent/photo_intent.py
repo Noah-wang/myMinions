@@ -131,6 +131,15 @@ def _sanitize(
         value = raw.get(key)
         return value.strip() if isinstance(value, str) else ""
 
+    model_race_date = _text("race_date")
+    fallback_race_date = extract_race_date(text)
+    race_date = model_race_date or fallback_race_date
+    if model_race_date and fallback_race_date:
+        # 模型有时会把「2024 五月26」抽成 2024-05。正则如果能读到日，
+        # 用更完整的日期覆盖模型结果。
+        if len(fallback_race_date) > len(model_race_date):
+            race_date = fallback_race_date
+
     # 模型挑的 id 同样不能直接信：不在已知分组里的一律丢掉，并保持它给的顺序
     raw_ids = raw.get("match_ids")
     match_ids: list[str] = []
@@ -148,7 +157,7 @@ def _sanitize(
         "used_fallback": False,
         # 模型漏抽时用正则补一手，两边都没有才算真没有
         "event": _text("event"),
-        "race_date": _text("race_date") or extract_race_date(text),
+        "race_date": race_date,
         "result": _text("result") or extract_result(text),
         "search_query": _text("search_query") or text.strip(),
         "reason": _text("reason"),

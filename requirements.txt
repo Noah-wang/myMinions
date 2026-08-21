@@ -1,5 +1,6 @@
 apscheduler
 discord.py
+fitdecode
 mcp
 numpy
 openai

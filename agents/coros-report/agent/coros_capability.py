@@ -1,8 +1,17 @@
+import discord
+
 from agent import list_available_coros_tools
 from graph import generate_coros_graph_report
-from auto_report import check_and_send_coros_auto_report, register_coros_auto_report
+from auto_report import check_and_send_coros_auto_report, latest_coros_activity, register_coros_auto_report
+from activity_browser import (
+    generate_selected_activity_report_for_conversation,
+    list_activity_records,
+    query_activity_records,
+)
 from feelings import list_recent_feelings, record_feeling
+from fit_archive import archive_fit_for_activities, render_route_map_for_activity
 from knowledge import answer_running_question
+from personal_bests import format_personal_bests
 from src.runtime.capability import Capability, CommandContext, TextCommand
 from video_knowledge import import_running_video_knowledge
 
@@ -16,6 +25,9 @@ async def _coros_report(context: CommandContext, argument: str) -> None:
     try:
         report = await generate_coros_graph_report(request)
         await context.send_chunks(report)
+        activity = await latest_coros_activity()
+        if activity is not None:
+            await _send_route_map(context, activity)
     except Exception as exc:
         await context.send(f"生成 COROS 报告失败：{exc}")
 
@@ -27,6 +39,73 @@ async def _coros_tools(context: CommandContext, _: str) -> None:
         await context.send_chunks(tools)
     except Exception as exc:
         await context.send(f"读取 COROS 工具失败：{exc}")
+
+
+async def _coros_list(context: CommandContext, argument: str) -> None:
+    await context.send("正在读取 COROS 运动记录列表...")
+    try:
+        records = await list_activity_records(argument)
+        await context.send_chunks(records)
+    except Exception as exc:
+        await context.send(f"读取 COROS 运动记录失败：{exc}")
+
+
+async def _coros_activity(context: CommandContext, argument: str) -> None:
+    await context.send("正在读取所选 COROS 运动详情并生成报告...")
+    try:
+        result = await generate_selected_activity_report_for_conversation(
+            argument,
+            context.conversation_id,
+        )
+        await context.send_chunks(result.report)
+        if result.activity is not None:
+            await _send_route_map(context, result.activity)
+    except Exception as exc:
+        await context.send(f"生成所选 COROS 运动报告失败：{exc}")
+
+
+async def _coros_pb(context: CommandContext, _: str) -> None:
+    await context.send(format_personal_bests())
+
+
+async def _coros_fit_sync(context: CommandContext, argument: str) -> None:
+    if context.read_only:
+        await context.send("网页入口不开放 FIT 文件归档。")
+        return
+
+    query = argument.strip() or "最近 30 天"
+    await context.send(f"正在同步 COROS FIT 文件：{query}")
+    try:
+        records, _, label = await query_activity_records(query)
+        if not records:
+            await context.send(f"没有查到 {label} 的 COROS 运动记录。")
+            return
+        results = await archive_fit_for_activities(records)
+        archived = sum(1 for result in results if result.paths)
+        downloaded = sum(1 for result in results if result.downloaded)
+        await context.send(
+            f"FIT 同步完成：{label}，检查 {len(results)} 条，"
+            f"已有或已归档 {archived} 条，本次新下载 {downloaded} 条。"
+        )
+    except Exception as exc:
+        await context.send(f"同步 FIT 文件失败：{exc}")
+
+
+async def _send_route_map(context: CommandContext, activity: dict) -> None:
+    if context.read_only:
+        return
+    try:
+        result = await render_route_map_for_activity(activity)
+    except Exception as exc:
+        message = str(exc) or exc.__class__.__name__
+        if "MAPBOX_ACCESS_TOKEN" not in message:
+            await context.send(f"路线图生成失败：{message}")
+        return
+
+    if result.path is None:
+        return
+
+    await context.channel.send("本次室外运动路线图：", file=discord.File(result.path))
 
 
 async def _running_ask(context: CommandContext, argument: str) -> None:
@@ -110,6 +189,30 @@ def build_coros_capability() -> Capability:
         text_commands=(
             TextCommand("coros", "生成 COROS 运动报告", _coros_report),
             TextCommand("coros-tools", "列出 COROS MCP 工具", _coros_tools),
+            TextCommand(
+                "coros-list",
+                "列出 COROS 运动记录摘要",
+                _coros_list,
+                aliases=("coros-activities",),
+            ),
+            TextCommand(
+                "coros-activity",
+                "选择一条 COROS 运动记录生成报告",
+                _coros_activity,
+                aliases=("coros-select",),
+            ),
+            TextCommand(
+                "coros-pb",
+                "查看 COROS 自动记录的个人 PB",
+                _coros_pb,
+                aliases=("pb", "personal-best", "personal-bests"),
+            ),
+            TextCommand(
+                "coros-fit-sync",
+                "手动同步 COROS FIT 原始文件",
+                _coros_fit_sync,
+                aliases=("fit-sync",),
+            ),
             TextCommand("running", "基于跑步书籍回答训练问题", _running_ask),
             TextCommand(
                 "running-video",

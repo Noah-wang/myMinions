@@ -4,22 +4,30 @@ const stage = document.querySelector(".stage");
 const chatLog = document.querySelector("#chatLog");
 const welcome = document.querySelector("#welcome");
 const suggestionsEl = document.querySelector("#suggestions");
+const conversationListEl = document.querySelector("#conversationList");
 const form = document.querySelector("#chatForm");
 const input = document.querySelector("#messageInput");
 const sendButton = document.querySelector("#sendButton");
 const newChatButton = document.querySelector("#newChat");
 
-const SESSION_KEY = "agentdeck-session";
-const FALLBACK_SUGGESTIONS = [
-  "我现在半马 1:40，全马 4:30，想提高全马成绩应该怎么练？",
-  "我今天这次训练怎么样？下一次应该怎么练？",
-  "我想做番茄牛腩，把食材加进采购清单",
+const ACTIVE_SESSION_KEY = "agentdeck-active-session";
+const CONVERSATIONS_KEY = "agentdeck-conversations-v2";
+const FALLBACK_ACTIONS = [
+  { title: "查最近 90 天运动记录", prompt: "列出我最近 90 天的运动记录" },
+  { title: "查最近一次训练报告", prompt: "我今天这次训练怎么样？下一次应该怎么练？" },
+  { title: "查个人 PB", prompt: "查我的个人 PB" },
+  { title: "查洛杉矶马拉松照片", prompt: "查洛杉矶马拉松照片" },
+  { title: "根据照片查比赛报告", prompt: "根据这次的运动记录生成一下报告" },
+  { title: "查成绩瓶颈", prompt: "我现在半马 1:40，全马 4:30，想提高全马成绩，应该加强哪部分训练？" },
+  { title: "查今天能做什么菜", prompt: "我今天根据库存能做什么？" },
+  { title: "查采购清单", prompt: "查一下采购清单" },
 ];
 
 let busy = false;
 let thinkingEl = null;
-
-/* 会话 */
+let activeSessionId = "";
+let defaultActions = FALLBACK_ACTIONS;
+let contextualActions = null;
 
 function newSessionId() {
   return crypto.randomUUID
@@ -27,24 +35,149 @@ function newSessionId() {
     : `s-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function conversationId() {
-  let id = sessionStorage.getItem(SESSION_KEY);
-  if (!id) {
-    id = newSessionId();
-    sessionStorage.setItem(SESSION_KEY, id);
-  }
-  return id;
+function emptyConversation() {
+  const now = new Date().toISOString();
+  return {
+    id: newSessionId(),
+    title: "当前对话",
+    createdAt: now,
+    updatedAt: now,
+    messages: [],
+  };
 }
 
-function resetConversation() {
-  sessionStorage.setItem(SESSION_KEY, newSessionId());
-  chatLog.replaceChildren(welcome);
-  welcome.hidden = false;
+function loadConversations() {
+  try {
+    const value = JSON.parse(localStorage.getItem(CONVERSATIONS_KEY) || "[]");
+    if (Array.isArray(value)) return value.filter((item) => item && item.id);
+  } catch {
+    return [];
+  }
+  return [];
+}
+
+function isEmptyConversation(conversation) {
+  const messages = Array.isArray(conversation?.messages) ? conversation.messages : [];
+  return messages.length === 0;
+}
+
+function normalizeConversations(conversations) {
+  const valid = conversations.filter((item) => item && item.id);
+  let empty = null;
+  const filled = [];
+
+  for (const conversation of valid) {
+    if (isEmptyConversation(conversation)) {
+      if (!empty || conversation.id === activeSessionId) empty = conversation;
+      continue;
+    }
+    filled.push(conversation);
+  }
+
+  return [...(empty ? [empty] : []), ...filled].slice(0, 24);
+}
+
+function saveConversations(conversations) {
+  localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(normalizeConversations(conversations)));
+}
+
+function activeConversation() {
+  let conversations = loadConversations();
+  let active = conversations.find((item) => item.id === activeSessionId);
+  if (!active) {
+    active = emptyConversation();
+    activeSessionId = active.id;
+    conversations = [active, ...conversations];
+    saveConversations(conversations);
+    localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
+  }
+  return active;
+}
+
+function updateActiveConversation(updater) {
+  const conversations = loadConversations();
+  const index = conversations.findIndex((item) => item.id === activeSessionId);
+  if (index === -1) return;
+  const next = { ...conversations[index] };
+  updater(next);
+  next.updatedAt = new Date().toISOString();
+  conversations[index] = next;
+  conversations.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  saveConversations(conversations);
+  renderConversationList();
+}
+
+function appendStoredMessage(role, text) {
+  updateActiveConversation((conversation) => {
+    const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
+    conversation.messages = [...messages, { role, text }];
+    if (role === "user" && ["新对话", "当前对话"].includes(conversation.title)) {
+      conversation.title = text.slice(0, 26) || "当前对话";
+    }
+  });
+}
+
+function conversationId() {
+  return activeSessionId;
+}
+
+function startNewConversation() {
+  if (busy) return;
+  const conversations = loadConversations();
+  let empty = conversations.find(isEmptyConversation);
+  if (!empty) {
+    empty = emptyConversation();
+    saveConversations([empty, ...conversations]);
+  }
+  activeSessionId = empty.id;
+  localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
+  renderConversationList();
+  renderConversation();
+  updateSuggestionsFromConversation();
   input.focus();
 }
 
-/* 渲染：markdown 渲染器抽到 markdown.js，和技术页共用 */
+function switchConversation(id) {
+  if (busy || id === activeSessionId) return;
+  activeSessionId = id;
+  localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
+  renderConversationList();
+  renderConversation();
+  updateSuggestionsFromConversation();
+  input.focus();
+}
 
+function renderConversationList() {
+  const conversations = loadConversations();
+  conversationListEl.replaceChildren();
+  for (const conversation of conversations.filter((item) => !isEmptyConversation(item))) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "conversation-item";
+    if (conversation.id === activeSessionId) button.classList.add("active");
+    button.innerHTML = `
+      <span class="conversation-title"></span>
+      <span class="conversation-meta"></span>
+    `;
+    const title = conversation.title === "新对话" ? "当前对话" : conversation.title;
+    button.querySelector(".conversation-title").textContent = title || "当前对话";
+    const count = Array.isArray(conversation.messages) ? conversation.messages.length : 0;
+    button.querySelector(".conversation-meta").textContent = count ? `${count} 条消息` : "空白对话";
+    button.addEventListener("click", () => switchConversation(conversation.id));
+    conversationListEl.appendChild(button);
+  }
+}
+
+function renderConversation() {
+  const conversation = activeConversation();
+  chatLog.replaceChildren(welcome);
+  const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
+  welcome.hidden = messages.length > 0;
+  for (const message of messages) {
+    appendMessage(message.role, message.text, { persist: false });
+  }
+  scrollToBottom();
+}
 
 function atBottom() {
   return stage.scrollHeight - stage.scrollTop - stage.clientHeight < 120;
@@ -58,7 +191,8 @@ function hideWelcome() {
   welcome.hidden = true;
 }
 
-function appendMessage(kind, text) {
+function appendMessage(kind, text, options = {}) {
+  const { persist = true } = options;
   hideWelcome();
   const article = document.createElement("article");
   article.className = `message ${kind}-message`;
@@ -71,11 +205,10 @@ function appendMessage(kind, text) {
   }
   article.appendChild(bubble);
   chatLog.appendChild(article);
+  if (persist) appendStoredMessage(kind, text);
   scrollToBottom();
   return bubble;
 }
-
-/* 思考中提示，收到正式回答后消失 */
 
 function showThinking(label) {
   hideWelcome();
@@ -95,8 +228,6 @@ function hideThinking() {
   thinkingEl = null;
 }
 
-/* 后端把「正在…」这类进度提示也当普通消息发过来，
-   这里识别出来只当临时状态显示，不留在对话记录里。 */
 function isProgressNotice(text) {
   return /^正在[^\n]{0,36}$/.test(text.trim());
 }
@@ -105,7 +236,6 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 16));
 
 async function streamText(bubble, text) {
   const total = text.length;
-  // 按真实时间推进，避免浏览器降帧时逐字渲染被拖得很慢。
   const durationMs = Math.min(1400, Math.max(320, total * 3));
   const startedAt = performance.now();
   let shown = 0;
@@ -114,10 +244,8 @@ async function streamText(bubble, text) {
     await tick();
     const progress = (performance.now() - startedAt) / durationMs;
     shown = Math.min(total, Math.max(shown + 1, Math.ceil(total * progress)));
-
     const stick = atBottom();
     bubble.innerHTML = renderMarkdown(text.slice(0, shown));
-    // 光标塞进最后一个块级元素里，否则会独占一行。
     const cursor = document.createElement("span");
     cursor.className = "cursor";
     (bubble.lastElementChild || bubble).appendChild(cursor);
@@ -126,8 +254,6 @@ async function streamText(bubble, text) {
 
   bubble.innerHTML = renderMarkdown(text);
 }
-
-/* 网络 */
 
 function parseSseEvents(buffer) {
   const events = [];
@@ -142,9 +268,7 @@ function parseSseEvents(buffer) {
       .filter((line) => line.startsWith("data:"))
       .map((line) => line.slice(5).trimStart())
       .join("\n");
-    if (data) {
-      events.push(JSON.parse(data));
-    }
+    if (data) events.push(JSON.parse(data));
     separatorIndex = remaining.indexOf("\n\n");
   }
 
@@ -183,7 +307,6 @@ async function streamChat(message) {
 
     for (const event of parsed.events) {
       if (event.type === "done") {
-        // 不依赖连接关闭来结束循环，收到 done 就收工。
         await reader.cancel().catch(() => {});
         return;
       }
@@ -195,19 +318,18 @@ async function streamChat(message) {
           continue;
         }
         hideThinking();
-        await streamText(appendMessage("agent", ""), text);
+        await streamText(appendMessage("agent", "", { persist: false }), text);
+        appendStoredMessage("agent", text);
+        updateContextualSuggestions("", text);
       } else if (event.type === "status") {
         showThinking(event.message || "思考中");
       } else if (event.type === "error") {
         hideThinking();
         appendMessage("error", `出错了：${event.error || "未知错误"}`);
       }
-      // trace 事件是内部执行信息，前端不展示
     }
   }
 }
-
-/* 交互 */
 
 function setBusy(value) {
   busy = value;
@@ -215,8 +337,6 @@ function setBusy(value) {
 }
 
 function autoGrow() {
-  // 内容为空时直接交回 CSS 的单行高度，不去读 scrollHeight，
-  // 否则清空输入框后高度会停在上一次撑开的值。
   if (!input.value) {
     input.style.height = "";
     return;
@@ -229,6 +349,7 @@ async function submitMessage(message) {
   if (busy || !message) return;
 
   appendMessage("user", message);
+  updateContextualSuggestions(message, "");
   input.value = "";
   autoGrow();
   setBusy(true);
@@ -245,15 +366,120 @@ async function submitMessage(message) {
   }
 }
 
-function renderSuggestions(prompts) {
+function fillComposer(message) {
+  input.value = message;
+  autoGrow();
+  input.focus();
+}
+
+function renderSuggestions(actions) {
   suggestionsEl.replaceChildren();
-  for (const prompt of prompts.slice(0, 3)) {
+  const loopActions = [...actions, ...actions];
+  for (const action of loopActions) {
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = prompt;
-    button.addEventListener("click", () => submitMessage(prompt));
+    button.className = "suggestion-row";
+    button.innerHTML = `
+      <span class="suggestion-title"></span>
+      <span class="suggestion-arrow" aria-hidden="true">→</span>
+    `;
+    button.querySelector(".suggestion-title").textContent = action.title;
+    button.addEventListener("click", () => fillComposer(action.prompt));
     suggestionsEl.appendChild(button);
   }
+}
+
+function applySuggestions() {
+  renderSuggestions(contextualActions || defaultActions);
+}
+
+function action(title, prompt) {
+  return { title, prompt };
+}
+
+function normalized(text) {
+  return String(text || "").toLowerCase();
+}
+
+function eventNameFromText(text) {
+  if (/洛杉矶|los\s*angeles|\bla\b/i.test(text)) return "洛杉矶马拉松";
+  if (/西山|17k/i.test(text)) return "西山17K越野跑";
+  const match = text.match(/([\u4e00-\u9fa5A-Za-z0-9\s]{2,18}(?:马拉松|半马|全马|越野跑|越野赛|路跑))/);
+  return match ? match[1].trim() : "这场比赛";
+}
+
+function contextualActionsFor(userText, agentText = "") {
+  const combined = `${userText}\n${agentText}`;
+  const text = normalized(combined);
+
+  if (/(照片|相册|图片|photo)|找到\s*\d+\s*组照片/.test(combined)) {
+    const eventName = eventNameFromText(combined);
+    return [
+      action("根据这场比赛生成报告", `根据${eventName}照片对应的运动记录生成一下报告`),
+      action("查对应运动记录", `根据${eventName}的比赛日期，查一下对应的运动记录`),
+      action("查看照片数据", `查看${eventName}照片保存了哪些信息`),
+      action("列出全部照片", "查看我保存过的所有比赛照片"),
+    ];
+  }
+
+  if (/运动记录|历史运动|记录列表|coros|activity|查到\s*最近/.test(text)) {
+    return [
+      action("分析第 1 条", "分析第 1 条运动记录"),
+      action("重点看后半程", "分析第 1 条运动记录，重点看后半程心率和配速"),
+      action("生成训练建议", "根据最近这条运动记录，告诉我下一次应该怎么练"),
+      action("查个人 PB", "查我的个人 PB"),
+    ];
+  }
+
+  if (/\bpb\b|个人最好|最好成绩|最好记录|半马|全马|成绩瓶颈/.test(text)) {
+    return [
+      action("制定全马训练计划", "根据我的半马和全马水平，制定一份全马训练计划"),
+      action("分析成绩短板", "我现在半马 1:40，全马 4:30，应该加强哪部分训练？"),
+      action("查跑步知识库", "根据已导入的跑步书籍，解释我当前成绩瓶颈"),
+      action("列出最近运动", "列出我最近 90 天的运动记录"),
+    ];
+  }
+
+  if (/菜|食材|库存|采购|过期|厨房|做什么/.test(combined)) {
+    return [
+      action("今天能做什么", "我今天根据库存能做什么？"),
+      action("查采购清单", "查一下采购清单"),
+      action("查快过期食材", "查一下快过期食材"),
+      action("推荐消耗顺序", "根据库存和保质期，告诉我这周应该先吃什么"),
+    ];
+  }
+
+  if (/rag|知识库|书籍|视频|训练计划|丹尼尔斯|跑步书/.test(text)) {
+    return [
+      action("引用原文回答", "根据跑步知识库，引用原文回答我的训练问题"),
+      action("制定训练计划", "根据我的当前能力和知识库，制定一份训练计划"),
+      action("解释训练原则", "根据已导入的跑步书籍，解释长距离训练怎么安排"),
+      action("查看知识库数据", "解释一下我的 RAG 知识库里有什么"),
+    ];
+  }
+
+  return null;
+}
+
+function updateContextualSuggestions(userText, agentText) {
+  contextualActions = contextualActionsFor(userText, agentText);
+  applySuggestions();
+}
+
+function updateSuggestionsFromConversation() {
+  const conversation = activeConversation();
+  const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
+  const recent = messages.slice(-4);
+  const userText = recent
+    .filter((message) => message.role === "user")
+    .map((message) => message.text)
+    .join("\n");
+  const agentText = recent
+    .filter((message) => message.role !== "user")
+    .map((message) => message.text)
+    .join("\n");
+  contextualActions = contextualActionsFor(userText, agentText);
+  applySuggestions();
 }
 
 async function loadSuggestions() {
@@ -261,10 +487,12 @@ async function loadSuggestions() {
     const response = await fetch("/api/capabilities");
     if (!response.ok) throw new Error();
     const payload = await response.json();
-    const prompts = Object.values(payload.sample_prompts || {});
-    renderSuggestions(prompts.length ? prompts : FALLBACK_SUGGESTIONS);
+    const actions = payload.sample_actions || FALLBACK_ACTIONS;
+    defaultActions = actions.length ? actions : FALLBACK_ACTIONS;
+    applySuggestions();
   } catch {
-    renderSuggestions(FALLBACK_SUGGESTIONS);
+    defaultActions = FALLBACK_ACTIONS;
+    applySuggestions();
   }
 }
 
@@ -282,11 +510,28 @@ input.addEventListener("keydown", (event) => {
   }
 });
 
-newChatButton.addEventListener("click", () => {
-  if (busy) return;
-  resetConversation();
-});
+newChatButton.addEventListener("click", startNewConversation);
 
-conversationId();
-loadSuggestions();
-input.focus();
+function boot() {
+  let conversations = loadConversations();
+  if (conversations.length) {
+    saveConversations(conversations);
+    conversations = loadConversations();
+  }
+  activeSessionId = localStorage.getItem(ACTIVE_SESSION_KEY) || conversations[0]?.id || "";
+  if (!conversations.length || !activeSessionId) {
+    const conversation = emptyConversation();
+    activeSessionId = conversation.id;
+    saveConversations([conversation]);
+    localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
+  }
+  renderConversationList();
+  renderConversation();
+  loadSuggestions();
+  updateSuggestionsFromConversation();
+  const prompt = new URLSearchParams(window.location.search).get("prompt");
+  if (prompt) fillComposer(prompt);
+  input.focus();
+}
+
+boot();

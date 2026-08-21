@@ -1,0 +1,55 @@
+- generic [ref=e1]:
+  - banner [ref=e2]:
+    - navigation [ref=e3]:
+      - link "对话" [ref=e4] [cursor=pointer]:
+        - /url: /
+      - link "数据" [ref=e5] [cursor=pointer]:
+        - /url: /data
+      - link "技术" [ref=e6] [cursor=pointer]:
+        - /url: /tech
+    - heading "AgentDeck" [level=1] [ref=e9]
+  - main [ref=e10]:
+    - complementary "对话列表" [ref=e11]:
+      - button "新对话" [ref=e12] [cursor=pointer]
+      - button "新对话 空白对话" [ref=e14] [cursor=pointer]:
+        - generic [ref=e15]: 新对话
+        - generic [ref=e16]: 空白对话
+    - generic [ref=e17]:
+      - generic [ref=e20]:
+        - heading "AgentDeck" [level=2] [ref=e21]
+        - paragraph [ref=e22]: 这个网页可以查询运动、照片、菜谱和知识库数据；写入操作只在 Discord 里开放。
+      - region "快捷问题" [ref=e23]:
+        - generic [ref=e24]:
+          - button "查最近 90 天运动记录" [ref=e25] [cursor=pointer]:
+            - generic [ref=e27]: →
+          - button "查最近一次训练报告" [ref=e28] [cursor=pointer]:
+            - generic [ref=e30]: →
+          - button "查个人 PB" [ref=e31] [cursor=pointer]:
+            - generic [ref=e33]: →
+          - button "查洛杉矶马拉松照片" [ref=e34] [cursor=pointer]:
+            - generic [ref=e36]: →
+          - button "查成绩瓶颈" [ref=e37] [cursor=pointer]:
+            - generic [ref=e39]: →
+          - button "查今天能做什么菜" [ref=e40] [cursor=pointer]:
+            - generic [ref=e42]: →
+          - button "查快过期食材" [ref=e43] [cursor=pointer]:
+            - generic [ref=e45]: →
+          - button "查最近 90 天运动记录" [ref=e46] [cursor=pointer]:
+            - generic [ref=e48]: →
+          - button "查最近一次训练报告" [ref=e49] [cursor=pointer]:
+            - generic [ref=e51]: →
+          - button "查个人 PB" [ref=e52] [cursor=pointer]:
+            - generic [ref=e54]: →
+          - button "查洛杉矶马拉松照片" [ref=e55] [cursor=pointer]:
+            - generic [ref=e57]: →
+          - button "查成绩瓶颈" [ref=e58] [cursor=pointer]:
+            - generic [ref=e60]: →
+          - button "查今天能做什么菜" [ref=e61] [cursor=pointer]:
+            - generic [ref=e63]: →
+          - button "查快过期食材" [ref=e64] [cursor=pointer]:
+            - generic [ref=e66]: →
+      - generic [ref=e67]:
+        - generic [ref=e68]: 消息
+        - textbox "消息" [active] [ref=e69]:
+          - /placeholder: 输入问题，或点击上方快捷问题填入……
+        - button "发送" [ref=e70] [cursor=pointer]

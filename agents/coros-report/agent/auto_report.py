@@ -7,11 +7,13 @@ from typing import Any
 
 import discord
 
+from fit_archive import archive_fit_for_activities, render_route_map_for_activity
 from shadowrunner_prompt import REPORT_SYSTEM_PROMPT
 from src.integrations.coros_mcp import call_coros_tool
 from src.runtime.llm import complete_text
 from src.runtime.memory import format_memory_for_prompt, get_agent_memory, update_agent_memory
 from src.runtime.scheduler import add_interval_job
+from personal_bests import update_personal_bests_from_tool_results
 
 
 AGENT_NAME = "coros-report"
@@ -94,8 +96,13 @@ def _parse_json_text(text: str) -> Any:
 
 
 def _records_from_text(text: str) -> list[dict[str, Any]]:
+    parsed = _parse_json_text(text)
+    if isinstance(parsed, str):
+        text = parsed
+
     records: list[dict[str, Any]] = []
-    for block in text.split("\n\n"):
+    blocks = re.split(r"\n\s*(?=\d+\.\s+)", text)
+    for block in blocks:
         label_match = re.search(r"LabelId:\s*(\d+)", block)
         sport_match = re.search(r"SportType:\s*(\d+)", block)
         start_match = re.search(r"startTimestamp=(\d+)", block)
@@ -117,9 +124,28 @@ def _records_from_text(text: str) -> list[dict[str, Any]]:
             record["sportName"] = title_match.group(1).strip()
             record["date"] = title_match.group(2)
 
-        distance_match = re.search(r"Distance:\s*([0-9.]+)\s*km", block)
+        duration_match = re.search(r"Duration:\s*([0-9:]+)", block)
+        if duration_match is not None:
+            record["duration"] = duration_match.group(1)
+
+        location_match = re.search(r"Location:\s*(.+)", block)
+        if location_match is not None:
+            record["location"] = location_match.group(1).strip()
+
+        pace_match = re.search(r"Average Pace:\s*([^|]+)", block)
+        if pace_match is not None:
+            record["averagePace"] = pace_match.group(1).strip()
+
+        heart_rate_match = re.search(r"Avg HR:\s*(\d+)\s*bpm", block)
+        if heart_rate_match is not None:
+            record["averageHeartRate"] = int(heart_rate_match.group(1))
+
+        distance_match = re.search(r"Distance:\s*([0-9.]+)\s*(km|m)\b", block)
         if distance_match is not None:
-            record["distanceKm"] = float(distance_match.group(1))
+            distance = float(distance_match.group(1))
+            if distance_match.group(2) == "m":
+                distance = distance / 1000
+            record["distanceKm"] = distance
 
         records.append(record)
     return records
@@ -177,7 +203,7 @@ def activity_key(activity: dict[str, Any]) -> str:
     return ":".join(parts)
 
 
-async def latest_coros_activity() -> dict[str, Any] | None:
+async def recent_coros_activities() -> list[dict[str, Any]]:
     timeout_seconds = _coros_tool_timeout_seconds()
     arguments = _activity_query_arguments()
     try:
@@ -194,9 +220,15 @@ async def latest_coros_activity() -> dict[str, Any] | None:
             timeout_seconds,
         )
     records = _activity_records(payload)
+    records.sort(key=_timestamp, reverse=True)
+    return records
+
+
+async def latest_coros_activity() -> dict[str, Any] | None:
+    records = await recent_coros_activities()
     if not records:
         return None
-    return max(records, key=_timestamp)
+    return records[0]
 
 
 def should_send_activity(activity: dict[str, Any]) -> bool:
@@ -223,17 +255,21 @@ def mark_activity_reported(activity: dict[str, Any]) -> None:
     )
 
 
-async def generate_auto_activity_report(activity: dict[str, Any]) -> str:
+async def generate_activity_report(
+    activity: dict[str, Any],
+    user_request: str,
+    source_arguments: dict[str, Any] | None = None,
+) -> str:
     label_id = activity.get("labelId")
     sport_type = activity.get("sportType")
     if label_id is None or sport_type is None:
-        raise RuntimeError("Latest COROS activity is missing labelId or sportType.")
+        raise RuntimeError("Selected COROS activity is missing labelId or sportType.")
 
     tool_results: list[dict[str, Any]] = [
         {
-            "tool": {"name": "querySportRecords", "arguments": _activity_query_arguments()},
+            "tool": {"name": "querySportRecords", "arguments": source_arguments or {}},
             "ok": True,
-            "result": {"selected_latest_activity": activity},
+            "result": {"selected_activity": activity},
         }
     ]
     detail_args = {"labelId": str(label_id), "sportType": int(sport_type)}
@@ -257,6 +293,16 @@ async def generate_auto_activity_report(activity: dict[str, Any]) -> str:
                 {"tool": {"name": tool_name, "arguments": arguments}, "ok": False, "error": str(exc)}
             )
 
+    pb_updates = update_personal_bests_from_tool_results(activity, tool_results)
+    if pb_updates:
+        tool_results.append(
+            {
+                "tool": {"name": "personalBestMemory", "arguments": {}},
+                "ok": True,
+                "result": {"updates": pb_updates},
+            }
+        )
+
     memory = format_memory_for_prompt(AGENT_NAME)
     return await _with_timeout(
         "llm_report_generation",
@@ -264,7 +310,9 @@ async def generate_auto_activity_report(activity: dict[str, Any]) -> str:
             REPORT_SYSTEM_PROMPT,
             f"""
 User request:
-自动检测到一条新的 COROS 运动。请只分析 selected_latest_activity 对应的这一次运动，并生成运动后报告。
+{user_request}
+
+请只分析 selected_activity 对应的这一次运动，并生成运动后报告。
 
 User memory:
 {memory}
@@ -276,6 +324,14 @@ Generate the workout report from the available COROS data.
 """.strip(),
         ),
         _llm_timeout_seconds(),
+    )
+
+
+async def generate_auto_activity_report(activity: dict[str, Any]) -> str:
+    return await generate_activity_report(
+        activity,
+        "自动检测到一条新的 COROS 运动。",
+        _activity_query_arguments(),
     )
 
 
@@ -344,6 +400,40 @@ async def _report_channel(client: discord.Client) -> discord.abc.Messageable | N
     return None
 
 
+async def _archive_recent_fit_files(records: list[dict[str, Any]]) -> None:
+    if not records:
+        return
+    try:
+        results = await archive_fit_for_activities(records)
+    except Exception as exc:
+        _log_auto_report(f"fit_archive_failed error={exc}")
+        return
+    archived = sum(1 for result in results if result.paths)
+    downloaded = sum(1 for result in results if result.downloaded)
+    _log_auto_report(f"fit_archive_done checked={len(results)} archived={archived} downloaded={downloaded}")
+
+
+async def _send_route_map_if_available(
+    channel: discord.abc.Messageable,
+    activity: dict[str, Any],
+) -> None:
+    try:
+        result = await render_route_map_for_activity(activity)
+    except Exception as exc:
+        message = str(exc) or exc.__class__.__name__
+        _log_auto_report(f"route_map_failed error={message}")
+        if "MAPBOX_ACCESS_TOKEN" not in message:
+            await channel.send(f"路线图生成失败：{message}")
+        return
+
+    if result.path is None:
+        _log_auto_report(f"route_map_skipped reason={result.message}")
+        return
+
+    _log_auto_report(f"route_map_send path={result.path} points={result.point_count}")
+    await channel.send("本次室外运动路线图：", file=discord.File(result.path))
+
+
 async def check_and_send_coros_auto_report(
     client: discord.Client,
     notify_no_change: bool = False,
@@ -363,11 +453,13 @@ async def check_and_send_coros_auto_report(
         _log_auto_report("channel_lookup_end")
 
         _log_auto_report("latest_activity_lookup_start")
-        activity = await latest_coros_activity()
-        if activity is None:
+        records = await recent_coros_activities()
+        if not records:
             _log_auto_report("activity_lookup records=0")
             return "COROS auto report skipped: no recent activity found."
 
+        await _archive_recent_fit_files(records)
+        activity = records[0]
         _log_auto_report(f"activity_lookup records>=1 {_activity_log_summary(activity)}")
 
         if not force_send and not should_send_activity(activity):
@@ -395,6 +487,7 @@ async def check_and_send_coros_auto_report(
         _log_auto_report("discord_report_send_start")
         await _send_chunks(channel, report)
         _log_auto_report("discord_report_send_end")
+        await _send_route_map_if_available(channel, activity)
         mark_activity_reported(activity)
         _log_auto_report("mark_activity_reported")
         return "COROS auto report sent."

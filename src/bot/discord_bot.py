@@ -117,6 +117,52 @@ def create_discord_client() -> discord.Client:
             "正在读取 COROS MCP 工具列表...",
         )
 
+    @tree.command(name="coros-list", description="列出 COROS 运动记录摘要")
+    @app_commands.describe(
+        days="最近多少天，默认 90；想查全部可在文字频道发送 !coros-list all",
+        limit="最多显示多少条，默认 20",
+    )
+    async def coros_list_command(
+        interaction: discord.Interaction,
+        days: int = 90,
+        limit: int = 20,
+    ) -> None:
+        await _dispatch_interaction_command(
+            interaction,
+            client,
+            "coros-list",
+            f"days={days} limit={limit}",
+            "正在读取 COROS 运动记录列表...",
+        )
+
+    @tree.command(name="coros-activity", description="选择一条 COROS 运动记录生成报告")
+    @app_commands.describe(
+        selection="列表序号或 labelId，例如：1",
+        question="可选：你想重点分析什么",
+    )
+    async def coros_activity_command(
+        interaction: discord.Interaction,
+        selection: str,
+        question: str = "",
+    ) -> None:
+        await _dispatch_interaction_command(
+            interaction,
+            client,
+            "coros-activity",
+            f"{selection} {question}".strip(),
+            "正在读取所选 COROS 运动并生成报告...",
+        )
+
+    @tree.command(name="coros-pb", description="查看 COROS 自动记录的个人 PB")
+    async def coros_pb_command(interaction: discord.Interaction) -> None:
+        await _dispatch_interaction_command(
+            interaction,
+            client,
+            "coros-pb",
+            "",
+            "正在读取 COROS 自动 PB。",
+        )
+
     # 跑步书籍回答命令
     @tree.command(name="running-ask", description="基于已导入跑步书籍回答训练问题")
     @app_commands.describe(question="你的跑步训练问题")

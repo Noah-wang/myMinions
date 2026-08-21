@@ -11,6 +11,7 @@ from src.runtime.capability import CommandContext, RuntimeAttachment
 from src.runtime.conversation import (
     PHOTO_MEMORY_TOPIC,
     RUNNING_COACH_TOPIC,
+    get_context_value,
     get_pending_questions,
 )
 from src.runtime.llm import complete_json
@@ -23,7 +24,7 @@ ROUTER_SYSTEM_PROMPT = """
 
 返回格式：
 {
-  "command": "coros | coros-tools | running | running-video | feel | feelings | kitchen | photo | discord-admin | none",
+  "command": "coros | coros-tools | coros-list | coros-activity | coros-pb | coros-fit-sync | running | running-video | feel | feelings | kitchen | photo | discord-admin | none",
   "argument": "传给命令的参数",
   "confidence": 0.0,
   "reason": "一句很短的原因"
@@ -37,6 +38,11 @@ ROUTER_SYSTEM_PROMPT = """
 - command = "coros" 时，argument 保留用户原话，用于生成运动报告。
 - 当用户问“今天这次训练怎么样”“最近一次运动/跑步怎么样”“帮我复盘今天/最近训练”“生成运动报告”“下一次应该怎么练”这类需要读取个人 COROS 运动记录、恢复、训练负荷或最近活动数据的问题时，只要 coros 在 allowed_commands 中，就优先选择 command = "coros"，不要选择 running。
 - command = "coros-tools" 时，argument 为空字符串，用于列出 COROS MCP 工具。
+- command = "coros-list" 时，用于列出 COROS 运动记录摘要。用户说“列出运动记录”“查看历史运动”“看最近运动列表”“查所有运动记录”时选择它，argument 保留用户的时间范围或条数要求。
+- command = "coros-activity" 时，用于分析用户刚才通过 coros-list 列表选择的某一条运动。用户说“分析第 1 条”“看第 3 条运动记录”“第 2 条重点看心率”时选择它，argument 保留原话。
+- 如果用户刚看过照片，然后说“这次/这场/这个比赛/根据照片/照片里的运动记录生成报告”，这也是 command = "coros-activity"，argument 保留原话。不要选 coros，因为 coros 会默认取最新运动。
+- command = "coros-pb" 时，用于查看 COROS 自动记录的个人 PB。用户说“查 PB”“个人最好成绩”“我的 5K/10K/半马/全马最好成绩”时选择它，argument 为空字符串。
+- command = "coros-fit-sync" 时，用于把 COROS 原始 FIT 文件下载归档到服务器。用户说“同步 FIT”“下载 FIT”“归档最近 90 天运动文件”时选择它，argument 保留时间范围和条数。
 - command = "running" 时，argument 保留用户原话，用于跑步知识问答，或补充跑步长期档案。
 - command = "running" 只用于不需要读取具体 COROS 活动记录的训练理论、训练计划、跑步书籍/RAG 问答、长期目标分析或用户档案补充。
 - 用户补充年龄、身高、体重、半马/全马成绩、目标成绩、目标日期、周跑量、最长跑、比赛崩盘原因时，如果 running 在 allowed_commands 中，优先选择 command = "running"。
@@ -56,6 +62,7 @@ ROUTER_SYSTEM_PROMPT = """
   - expiring
 - command = "photo" 时，argument 保留用户原话。照片能力内部会自己做意图识别，
   判断是新建一组、追加到已有分组、补充元数据还是检索，这里不要替它决定。
+  Web 入口只允许照片检索，不允许保存或修改。
 - command = "discord-admin" 时，argument 保留用户原话，只用于 Discord 服务器管理。
   目前只支持修改服务器头像/图标。普通频道没有独立头像，不要把频道图片请求路由到这里。
 """.strip()
@@ -345,9 +352,13 @@ class MainAgentOrchestrator:
         allowed_commands: tuple[str, ...] = (
             "coros",
             "coros-tools",
+            "coros-list",
+            "coros-activity",
+            "coros-pb",
             "running",
             "feelings",
             "kitchen",
+            "photo",
         ),
     ) -> NaturalLanguageRoute | None:
         """接收来自 Web 端（网页入口）的文本输入并进行分发。
@@ -414,6 +425,7 @@ class MainAgentOrchestrator:
                 -1,
                 stripped,
                 allowed_commands,
+                self._conversation_id(channel),
             )
         except Exception as exc:
             await self._send_error(channel, "自然语言路由失败", exc)
@@ -622,6 +634,7 @@ class MainAgentOrchestrator:
             channel_id,
             content,
             allowed_commands,
+            f"channel:{channel_id}",
         )
 
     async def _route_natural_language_from_allowed(
@@ -629,6 +642,7 @@ class MainAgentOrchestrator:
         channel_id: int,
         content: str,
         allowed_commands: tuple[str, ...],
+        conversation_id: str,
     ) -> NaturalLanguageRoute | None:
         """在给定的允许指令白名单中，调用 LLM 对消息进行意图路由。
 
@@ -636,7 +650,21 @@ class MainAgentOrchestrator:
             channel_id: 频道 ID。
             content: 原始文本消息。
             allowed_commands: 允许匹配的指令列表。
+            conversation_id: 当前对话 ID，用于读取多轮上下文。
         """
+        context_route = self._route_from_conversation_context(
+            content,
+            allowed_commands,
+            conversation_id,
+        )
+        if context_route is not None:
+            self._log(
+                "natural_language_context_route "
+                f"channel_id={channel_id} command={context_route.command_name} "
+                f"argument={context_route.argument!r}"
+            )
+            return context_route
+
         try:
             route = await asyncio.wait_for(
                 complete_json(
@@ -660,12 +688,78 @@ class MainAgentOrchestrator:
             )
         return parsed_route
 
+    def _route_from_conversation_context(
+        self,
+        content: str,
+        allowed_commands: tuple[str, ...],
+        conversation_id: str,
+    ) -> NaturalLanguageRoute | None:
+        """处理必须依赖上一轮上下文的短语引用。
+
+        LLM 路由器只看当前一句话，容易把「根据这次的运动记录生成报告」
+        理解成最近一次 COROS 训练。这里在进 LLM 前先看会话里是否刚
+        检索过带比赛日期的照片，如果有，就把「这次」绑定到照片那场比赛。
+        """
+        if "coros-activity" not in allowed_commands:
+            return None
+        if not self._looks_like_photo_context_activity_request(content):
+            return None
+        context = get_context_value(
+            conversation_id,
+            RUNNING_COACH_TOPIC,
+            "recent_photo_context",
+        )
+        if not isinstance(context, dict):
+            return None
+        if not str(context.get("race_date") or "").strip():
+            return None
+        return NaturalLanguageRoute(
+            "coros-activity",
+            content.strip(),
+            1.0,
+            "photo context activity",
+        )
+
+    def _looks_like_photo_context_activity_request(self, content: str) -> bool:
+        text = content.strip()
+        if not text:
+            return False
+
+        context_terms = (
+            "这次",
+            "这场",
+            "这个比赛",
+            "这次比赛",
+            "这场比赛",
+            "刚才",
+            "照片里的",
+            "根据照片",
+            "根据这次",
+        )
+        activity_terms = (
+            "运动记录",
+            "运动",
+            "训练",
+            "跑步",
+            "比赛",
+            "报告",
+            "分析",
+            "复盘",
+        )
+        return any(term in text for term in context_terms) and any(
+            term in text for term in activity_terms
+        )
+
     def _allowed_natural_language_commands(self, channel_id: int) -> tuple[str, ...]:
         """获取当前频道所允许调用的所有自然语言路由指令的白名单。"""
         commands: list[str] = []
         for command_name in (
             "coros",
             "running",
+            "coros-list",
+            "coros-activity",
+            "coros-pb",
+            "coros-fit-sync",
             "running-video",
             "feel",
             "feelings",
@@ -686,6 +780,10 @@ class MainAgentOrchestrator:
         command_descriptions = {
             "coros": "生成 COROS 单次运动报告或训练复盘。",
             "coros-tools": "列出 COROS MCP 当前提供的工具。",
+            "coros-list": "列出 COROS 运动记录摘要，供用户选择某一条。",
+            "coros-activity": "根据 coros-list 的序号或 ID，分析用户选择的单条 COROS 运动。",
+            "coros-pb": "查看 COROS 自动记录的个人 PB。",
+            "coros-fit-sync": "把 COROS 原始 FIT 文件下载归档到服务器。",
             "running": (
                 "基于跑步知识库回答训练方法、计划、成绩瓶颈问题，"
                 "也接收年龄、身高、体重、半马/全马成绩、目标、跑量、比赛问题等长期档案补充。"
@@ -734,10 +832,10 @@ User message:
             argument = ""
         argument = argument.strip()
 
-        if command_name in {"coros", "running", "feel"} and not argument:
+        if command_name in {"coros", "coros-activity", "coros-fit-sync", "running", "feel"} and not argument:
             argument = original_content
 
-        if command_name == "coros-tools":
+        if command_name in {"coros-tools", "coros-pb"}:
             argument = ""
 
         if command_name == "running-video" and not self._valid_running_video_argument(
@@ -837,7 +935,7 @@ User message:
             action = argument.strip().partition(" ")[0]
             return action in self.READ_ONLY_KITCHEN_ACTIONS
         if command_name == "photo":
-            return False
+            return bool(argument.strip())
         if command_name == "discord-admin":
             return False
         return True

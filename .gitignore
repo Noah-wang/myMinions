@@ -9,4 +9,5 @@ agents/coros-report/config.toml
 data/knowledge/coros-report/videos/
 data/photo-memory/
 data/media/
+data/coros-report/
 **/.secrets/

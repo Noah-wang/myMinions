@@ -3,6 +3,7 @@ import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import quote
 from uuid import uuid4
 
 from src.runtime.atomic import write_json_batch
@@ -136,14 +137,39 @@ def extract_event(text: str) -> str:
     return name or "未命名照片"
 
 
-def extract_race_date(text: str) -> str:
-    match = re.search(r"(20\d{2})[-/.年](\d{1,2})(?:[-/.月](\d{1,2})日?)?", text)
-    if not match:
+def _format_date(year: str, month: str, day: str = "") -> str:
+    year_value = int(year)
+    month_value = _to_int(month)
+    day_value = _to_int(day) if day else None
+    if month_value is None or not 1 <= month_value <= 12:
         return ""
-    year, month, day = match.groups()
-    if not day:
-        return f"{int(year):04d}-{int(month):02d}"
-    return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+    if day and (day_value is None or not 1 <= day_value <= 31):
+        return ""
+    if day_value is None:
+        return f"{year_value:04d}-{month_value:02d}"
+    return f"{year_value:04d}-{month_value:02d}-{day_value:02d}"
+
+
+def extract_race_date(text: str) -> str:
+    """抽比赛日期，支持数字和中文月份。
+
+    用户经常会写成「2024 五月26」或「2024年五月二十六号」。
+    这类表达里年份和月份之间没有固定分隔符，旧正则会只抓到年月。
+    """
+    number = rf"[{NUMBER_CHARS}]{{1,3}}"
+    patterns = (
+        rf"(20\d{{2}})\s*(?:年|[-/.])?\s*({number})\s*月\s*({number})?\s*(?:日|号)?",
+        r"(20\d{2})[-/.年](\d{1,2})(?:[-/.月](\d{1,2})\s*(?:日|号)?)?",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        year, month, day = match.groups()
+        formatted = _format_date(year, month, day or "")
+        if formatted:
+            return formatted
+    return ""
 
 
 def extract_result(text: str) -> str:
@@ -601,6 +627,20 @@ def photo_paths(record: dict[str, object]) -> list[Path]:
             if path.exists():
                 paths.append(path)
     return paths
+
+
+def photo_urls(record: dict[str, object]) -> list[str]:
+    urls = []
+    for path in photo_paths(record):
+        try:
+            relative = path.relative_to(MEDIA_DIR)
+        except ValueError:
+            continue
+        urls.append(
+            "/media/photo-memory/"
+            + quote(relative.as_posix(), safe="/")
+        )
+    return urls
 
 
 def format_photo_summary(records: list[dict[str, object]]) -> str:

@@ -12,13 +12,19 @@ from photo_store import (
     merge_groups,
     pending_photo_id,
     photo_paths,
+    photo_urls,
     restore_pending_questions,
     save_photo_batch,
     search_photos,
     update_photo_meta,
 )
 from src.runtime.capability import Capability, CommandContext, TextCommand
-from src.runtime.conversation import PHOTO_MEMORY_TOPIC, set_pending_questions
+from src.runtime.conversation import (
+    PHOTO_MEMORY_TOPIC,
+    RUNNING_COACH_TOPIC,
+    set_context_value,
+    set_pending_questions,
+)
 
 
 PHOTO_HELP = """
@@ -61,7 +67,7 @@ def _strip_explicit_action(text: str) -> tuple[str, str]:
 
 async def _photo(context: CommandContext, argument: str) -> None:
     if context.read_only:
-        await context.send("网页入口不开放照片库。请在 Discord 里使用照片记忆。")
+        await _photo_read_only(context, argument)
         return
 
     forced_action, text = _strip_explicit_action(argument)
@@ -92,6 +98,57 @@ async def _photo(context: CommandContext, argument: str) -> None:
 
     await _execute(context, intent, text)
     _sync_pending_questions(context)
+
+
+async def _photo_read_only(context: CommandContext, argument: str) -> None:
+    forced_action, text = _strip_explicit_action(argument)
+    if forced_action and forced_action != "search":
+        await context.send("网页入口只能查看照片，保存和修改请在 Discord 里操作。")
+        return
+
+    query = text.strip()
+    if not query:
+        groups = list_recent_groups()
+        if not groups:
+            await context.send("照片库还没有保存照片。")
+            return
+        names = "\n".join(
+            f"- {group['event']}：{group['photo_count']} 张"
+            for group in groups[:10]
+        )
+        await context.send(f"照片库最近保存的分组：\n{names}\n\n你可以问：查洛杉矶马拉松照片。")
+        return
+
+    intent = await classify_photo_intent(
+        query,
+        False,
+        list_recent_groups(),
+        "",
+    )
+    if intent["used_fallback"]:
+        records = search_photos(intent["search_query"] or query)
+    else:
+        records = [
+            group for group in (find_group(pid) for pid in intent["match_ids"]) if group
+        ]
+        if not records:
+            records = search_photos(intent["search_query"] or query)
+
+    if not records:
+        await context.send(f"没有找到和「{query}」相关的照片。")
+        return
+
+    _remember_photo_context(context, records)
+    lines = [format_photo_summary(records), ""]
+    for record in records:
+        title = str(record.get("event", "照片"))
+        urls = photo_urls(record)
+        if not urls:
+            continue
+        lines.append(f"### {title}")
+        for index, url in enumerate(urls, start=1):
+            lines.append(f"![{title} {index}]({url})")
+    await context.send("\n".join(lines).strip())
 
 
 async def _execute(context: CommandContext, intent: dict, text: str) -> None:
@@ -192,6 +249,7 @@ async def _search_and_send(context: CommandContext, intent: dict) -> None:
 
     if not records:
         hint = f"没有找到和「{query}」相关的照片。" if query else "你想看哪组照片？"
+        names = ""
         groups = list_recent_groups()
         if groups:
             names = "、".join(str(g["event"]) for g in groups[:5])
@@ -200,8 +258,41 @@ async def _search_and_send(context: CommandContext, intent: dict) -> None:
         return
 
     await context.send(format_photo_summary(records))
+    _remember_photo_context(context, records)
     for record in records:
         await _send_files(context, photo_paths(record))
+
+
+def _remember_photo_context(
+    context: CommandContext,
+    records: list[dict[str, object]],
+) -> None:
+    if len(records) != 1:
+        return
+
+    record = records[0]
+    race_date = str(record.get("race_date") or "").strip()
+    if not race_date:
+        return
+
+    value = {
+        "photo_id": record.get("id"),
+        "event": record.get("event"),
+        "race_date": race_date,
+        "result": record.get("result"),
+    }
+    set_context_value(
+        context.conversation_id,
+        RUNNING_COACH_TOPIC,
+        "recent_photo_context",
+        value,
+    )
+    set_context_value(
+        context.conversation_id,
+        PHOTO_MEMORY_TOPIC,
+        "recent_photo_context",
+        value,
+    )
 
 
 def _restore_pending(_client: object) -> None:

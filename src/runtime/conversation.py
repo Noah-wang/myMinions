@@ -207,6 +207,40 @@ def get_pending_questions(conversation_id: str | None, topic: str) -> tuple[str,
         return tuple(session["pending_questions"])
 
 
+def set_context_value(
+    conversation_id: str | None,
+    topic: str,
+    key: str,
+    value: object,
+) -> None:
+    if not conversation_id or not key:
+        return
+
+    with _lock:
+        session = _touch_session((conversation_id, topic), time.time())
+        context = session.setdefault("context", {})
+        if isinstance(context, dict):
+            context[key] = value
+
+
+def get_context_value(
+    conversation_id: str | None,
+    topic: str,
+    key: str,
+) -> object | None:
+    if not conversation_id or not key:
+        return None
+
+    with _lock:
+        session = _live_session((conversation_id, topic), time.time())
+        if session is None:
+            return None
+        context = session.get("context")
+        if not isinstance(context, dict):
+            return None
+        return context.get(key)
+
+
 def clear_history(conversation_id: str | None, topic: str) -> None:
     if not conversation_id:
         return

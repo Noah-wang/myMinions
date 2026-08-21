@@ -1,0 +1,48 @@
+- generic [ref=e1]:
+  - banner [ref=e2]:
+    - heading "AgentDeck" [level=1] [ref=e5]
+    - navigation [ref=e6]:
+      - link "对话" [ref=e7] [cursor=pointer]:
+        - /url: /
+      - link "数据" [ref=e8] [cursor=pointer]:
+        - /url: /data
+      - link "技术" [ref=e9] [cursor=pointer]:
+        - /url: /tech
+  - main [ref=e10]:
+    - complementary "对话列表" [ref=e11]:
+      - button "我要看洛杉矶马拉松的照片 2 条消息" [ref=e72] [cursor=pointer]:
+        - generic [ref=e73]: 我要看洛杉矶马拉松的照片
+        - generic [ref=e74]: 2 条消息
+    - generic [ref=e16]:
+      - generic [ref=e18]:
+        - article [ref=e75]:
+          - generic [ref=e76]: 我要看洛杉矶马拉松的照片
+        - article [ref=e77]:
+          - generic [ref=e78]:
+            - paragraph [ref=e79]: 找到 1 组照片：
+            - list [ref=e80]:
+              - listitem [ref=e81]: 洛杉矶马拉松 · 2026-03 · 成绩 4:30:48：3 张
+            - paragraph [ref=e82]: 真实模式下这里会直接显示照片缩略图；网页入口只允许查看，不允许保存或修改照片库。
+      - region "快捷问题" [ref=e22]:
+        - generic [ref=e23]:
+          - button "根据这场比赛生成报告" [ref=e83] [cursor=pointer]:
+            - generic [ref=e85]: →
+          - button "查对应运动记录" [ref=e86] [cursor=pointer]:
+            - generic [ref=e88]: →
+          - button "查看照片数据" [ref=e89] [cursor=pointer]:
+            - generic [ref=e91]: →
+          - button "列出全部照片" [ref=e92] [cursor=pointer]:
+            - generic [ref=e94]: →
+          - button "根据这场比赛生成报告" [ref=e95] [cursor=pointer]:
+            - generic [ref=e97]: →
+          - button "查对应运动记录" [ref=e98] [cursor=pointer]:
+            - generic [ref=e100]: →
+          - button "查看照片数据" [ref=e101] [cursor=pointer]:
+            - generic [ref=e103]: →
+          - button "列出全部照片" [ref=e104] [cursor=pointer]:
+            - generic [ref=e106]: →
+      - generic [ref=e66]:
+        - generic [ref=e67]: 消息
+        - textbox "消息" [active] [ref=e68]:
+          - /placeholder: 输入问题，或点击上方快捷问题填入……
+        - button "发送" [ref=e69] [cursor=pointer]

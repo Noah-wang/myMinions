@@ -1,0 +1,75 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - heading "AgentDeck" [level=1] [ref=e5]
+    - navigation [ref=e6]:
+      - link "对话" [ref=e7] [cursor=pointer]:
+        - /url: /
+      - link "数据" [ref=e8] [cursor=pointer]:
+        - /url: /data
+      - link "技术" [ref=e9] [cursor=pointer]:
+        - /url: /tech
+  - main [ref=e10]:
+    - region [ref=e11]:
+      - generic [ref=e12]:
+        - paragraph [ref=e13]: Personal Agent Data
+        - heading "你的 Agent 记忆库" [level=2] [ref=e14]
+        - paragraph [ref=e15]: 这里集中展示网页可读的数据：PB、比赛照片、跑步知识库、COROS 原始记录和后厨数据。 公开网页只读，写入和修改仍通过 Discord 完成。
+      - link "回到对话" [ref=e16] [cursor=pointer]:
+        - /url: /
+    - region "数据概览" [ref=e17]:
+      - article [ref=e18]:
+        - generic [ref=e19]: 数据模块
+        - strong [ref=e20]: "6"
+        - generic [ref=e21]: 个人只读资料库
+      - article [ref=e22]:
+        - generic [ref=e23]: 照片
+        - strong [ref=e24]: "0"
+        - generic [ref=e25]: Discord 写入，网页查看
+      - article [ref=e26]:
+        - generic [ref=e27]: 知识块
+        - strong [ref=e28]: "145"
+        - generic [ref=e29]: 书籍与视频 RAG
+      - article [ref=e30]:
+        - generic [ref=e31]: FIT 文件
+        - strong [ref=e32]: "1"
+        - generic [ref=e33]: COROS 原始运动归档
+      - article [ref=e34]:
+        - generic [ref=e35]: 菜谱
+        - strong [ref=e36]: "1"
+        - generic [ref=e37]: B 站字幕提取
+    - navigation "数据分类" [ref=e38]:
+      - button "运动画像" [ref=e39] [cursor=pointer]
+      - button "个人 PB" [ref=e40] [cursor=pointer]
+      - button "照片记忆" [ref=e41] [cursor=pointer]
+      - button "RAG 知识库" [ref=e42] [cursor=pointer]
+      - button "COROS 数据" [ref=e43] [cursor=pointer]
+      - button "后厨数据" [ref=e44] [cursor=pointer]
+    - generic [ref=e45]:
+      - generic [ref=e47]:
+        - paragraph [ref=e48]: Read only
+        - heading "运动画像" [level=3] [ref=e49]
+        - paragraph [ref=e50]: 长期稳定信息，给训练计划和报告提供背景。
+      - generic [ref=e51]:
+        - article [ref=e52]:
+          - generic [ref=e53]:
+            - generic [ref=e54]: 画像
+            - heading "当前能力画像" [level=4] [ref=e55]
+            - paragraph [ref=e56]: 长期记忆 · 用户确认过的稳定信息
+            - paragraph [ref=e57]: 用于训练计划、成绩瓶颈分析和追问判断。
+            - generic [ref=e58]:
+              - generic [ref=e59]:
+                - generic [ref=e60]: 半马
+                - strong [ref=e61]: 1:40:00
+              - generic [ref=e62]:
+                - generic [ref=e63]: 全马
+                - strong [ref=e64]: 4:30:00
+          - link "用它提问" [ref=e65] [cursor=pointer]:
+            - /url: /?prompt=%E6%A0%B9%E6%8D%AE%E6%88%91%E7%9A%84%E5%BD%93%E5%89%8D%E8%83%BD%E5%8A%9B%EF%BC%8C%E5%88%B6%E5%AE%9A%E4%B8%80%E4%BB%BD%E8%AE%AD%E7%BB%83%E8%AE%A1%E5%88%92
+        - article [ref=e66]:
+          - generic [ref=e67]:
+            - generic [ref=e68]: 画像
+            - heading "全马目标" [level=4] [ref=e69]
+            - paragraph [ref=e70]: 目标成绩未填写 · 目标日期未填写
+            - paragraph [ref=e71]: 目标信息会影响训练周期、长距离安排和强度比例。
+          - link "用它提问" [ref=e72] [cursor=pointer]:
+            - /url: /?prompt=%E6%A0%B9%E6%8D%AE%E6%88%91%E7%9A%84%E7%9B%AE%E6%A0%87%EF%BC%8C%E5%B8%AE%E6%88%91%E5%AE%89%E6%8E%92%E6%8E%A5%E4%B8%8B%E6%9D%A5%E7%9A%84%E8%AE%AD%E7%BB%83%E5%91%A8%E6%9C%9F
