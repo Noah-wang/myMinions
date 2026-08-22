@@ -13,6 +13,9 @@ from src.runtime.conversation import (
     set_pending_questions,
 )
 from src.runtime.memory import format_memory_for_prompt
+from src.runtime.prompt import compose
+from src.runtime.untrusted import UNTRUSTED_CONTENT_RULE
+from src.runtime.untrusted import wrap as wrap_untrusted
 from src.runtime.rag import (
     DEFAULT_TOP_K,
     format_context,
@@ -28,7 +31,7 @@ RETRIEVAL_TOP_K = DEFAULT_TOP_K
 FOLLOW_UP_HEADINGS = {"还需要确认", "仍需确认"}
 NO_QUESTION_MARKERS = {"暂无", "暂无。", "无", "无。", "没有", "没有。"}
 
-RUNNING_KNOWLEDGE_PROMPT = """
+RUNNING_KNOWLEDGE_ROLE = """
 You are a running training advisor using the user's long-term profile and the provided knowledge excerpts.
 
 Rules:
@@ -88,6 +91,8 @@ Mode 诊断 (exception) - the user brings a complex problem, wants a plan, or as
 - End with at most 2 questions, written as normal sentences, not a numbered checklist.
 - If the user is answering questions you asked earlier, say what changed before anything else, and never re-open a question they already answered.
 """.strip()
+
+RUNNING_KNOWLEDGE_PROMPT = compose(RUNNING_KNOWLEDGE_ROLE, UNTRUSTED_CONTENT_RULE)
 
 
 def _quote_excerpt(text: str, max_chars: int = 220) -> str:
@@ -258,7 +263,8 @@ async def answer_running_question(
         set_pending_questions(conversation_id, CONVERSATION_TOPIC, [])
         return base_message
 
-    context = format_context(chunks)
+    # 书籍原文和视频字幕都是第三方能控制的文本，必须带边界标签进提示词
+    context = wrap_untrusted(format_context(chunks), source="knowledge-base")
     memory = format_memory_for_prompt("coros-report")
     pending_block = _format_pending_questions(pending_questions)
     answer = await run_tool_loop(

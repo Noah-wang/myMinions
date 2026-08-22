@@ -110,6 +110,9 @@ KNOWLEDGE_TOOL = Tool(
         "required": ["query"],
     },
     handler=search_running_knowledge,
+    # 返回的是书籍原文和 B站字幕——第三方能控制的文本。
+    # 一旦它进了上下文，本轮就不再允许写操作。
+    returns_untrusted=True,
 )
 
 

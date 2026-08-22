@@ -62,6 +62,9 @@ class TextCommand:
     # 这条命令会不会改变状态。主 Agent 的循环按它决定在只读入口暴露哪些工具——
     # 权限挂在命令自己身上，而不是散落在调用方的 if 里。
     writes: bool = False
+    # 这条命令的输出里含有第三方能控制的文本（书籍原文、视频字幕）。
+    # 包装成工具后，它一旦执行过，本轮就不再允许写操作。
+    returns_untrusted: bool = False
     # writes=True 但这条命令自己会在只读入口拒掉写操作，所以仍然可以暴露。
     # kitchen 一条命令下面既有 pantry 也有 bought，粗粒度的 writes 表达不了；
     # photo 和 running 则是在能力内部按 read_only 裁剪自己的动作。

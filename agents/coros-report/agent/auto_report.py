@@ -7,6 +7,8 @@ from typing import Any
 
 import discord
 
+from src.runtime.trace import new_trace
+
 from fit_archive import archive_fit_for_activities, render_route_map_for_activity
 from shadowrunner_prompt import REPORT_SYSTEM_PROMPT
 from src.integrations.coros_mcp import call_coros_tool
@@ -443,6 +445,10 @@ async def check_and_send_coros_auto_report(
     global _job_running
     if _job_running:
         return "COROS auto report skipped: previous job is still running."
+
+    # 定时任务也要有 trace。后台跑的活出问题时最难查——没人在旁边看着，
+    # 只能靠事后翻日志，而没有 trace 就串不起一次完整的执行。
+    new_trace("cron")
 
     _job_running = True
     try:

@@ -7,7 +7,12 @@ from typing import Any
 from auto_report import _activity_records, _timestamp, activity_key, generate_activity_report
 from src.integrations.coros_mcp import call_coros_tool
 from src.runtime.conversation import RUNNING_COACH_TOPIC, get_context_value
-from src.runtime.memory import get_agent_memory, update_agent_memory
+from src.runtime.memory import (
+    get_agent_cache,
+    get_agent_memory,
+    update_agent_cache,
+    update_agent_memory,
+)
 
 
 AGENT_NAME = "coros-report"
@@ -294,7 +299,7 @@ async def query_activity_records(argument: str) -> tuple[list[dict[str, Any]], d
     payload = await call_coros_tool("querySportRecords", arguments)
     records = [_normalize_activity(record) for record in _activity_records(payload)]
     records.sort(key=lambda item: int(item.get("sortTimestamp") or 0), reverse=True)
-    update_agent_memory(
+    update_agent_cache(
         AGENT_NAME,
         {
             "last_activity_list": records,
@@ -323,7 +328,7 @@ async def query_activity_records_for_photo_context(
         reverse=True,
     )
     label = f"{context.get('event') or '照片对应比赛'}（{context.get('race_date')}）附近"
-    update_agent_memory(
+    update_agent_cache(
         AGENT_NAME,
         {
             "last_activity_list": records,
@@ -384,7 +389,7 @@ def _split_selection(argument: str) -> tuple[str, str]:
 
 
 def _load_cached_activities() -> list[dict[str, Any]]:
-    records = get_agent_memory(AGENT_NAME).get("last_activity_list")
+    records = get_agent_cache(AGENT_NAME).get("last_activity_list")
     if not isinstance(records, list):
         return []
     return [record for record in records if isinstance(record, dict)]
@@ -421,7 +426,7 @@ async def report_selected_activity(argument: str) -> str:
     report = await generate_activity_report(
         activity,
         f"用户选择了运动记录：{title}\n用户问题：{request}",
-        get_agent_memory(AGENT_NAME).get("last_activity_list_query"),
+        get_agent_cache(AGENT_NAME).get("last_activity_list_query"),
     )
     return f"已选择：{title}\n\n{report}"
 
@@ -477,7 +482,7 @@ async def generate_selected_activity_report_for_conversation(
     report = await generate_activity_report(
         activity,
         f"用户选择了运动记录：{title}\n用户问题：{request}",
-        get_agent_memory(AGENT_NAME).get("last_activity_list_query"),
+        get_agent_cache(AGENT_NAME).get("last_activity_list_query"),
     )
     return ActivityReportResult(
         f"{context_note}已选择：{title}\n\n{report}",

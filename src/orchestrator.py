@@ -17,6 +17,7 @@ from src.runtime.conversation import (
 )
 from src.runtime.llm import complete_json
 from src.runtime.tools import Tool
+from src.runtime.trace import Span, log_event, new_trace
 
 
 ROUTER_SYSTEM_PROMPT = """
@@ -238,6 +239,20 @@ class MainAgentOrchestrator:
             channel: 聊天频道。
             content: 接收到的文本内容。
         """
+        new_trace("dc")
+        with Span("request", surface="discord", channel=channel.id, chars=len(content.strip())):
+            return await self._dispatch_text_inner(
+                client, channel, content, attachments, message
+            )
+
+    async def _dispatch_text_inner(
+        self,
+        client: object,
+        channel: MessageChannel,
+        content: str,
+        attachments: tuple[RuntimeAttachment, ...] = (),
+        message: object | None = None,
+    ) -> bool:
         stripped = content.strip()
         if stripped == "!capabilities":
             if self.is_capabilities_channel(channel.id):
@@ -975,6 +990,8 @@ User message:
                 "required": [],
             },
             handler=handler,
+            writes=command.writes,
+            returns_untrusted=command.returns_untrusted,
         )
 
     def _loop_tools(
@@ -1171,8 +1188,12 @@ User message:
         return self._discord_admin_action(argument) is not None
 
     def _log(self, message: str) -> None:
-        """输出编排器运行的调试和状态日志。"""
-        print(f"orchestrator {message}", flush=True)
+        """输出编排器运行的调试和状态日志。
+
+        保留这条老通道是为了不动散落在各处的调用点，但它现在会带上 trace，
+        这样和 log_event 打出来的结构化事件能串到同一次请求上。
+        """
+        log_event("orchestrator", detail=message)
 
     def _command_context(
         self,

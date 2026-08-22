@@ -18,7 +18,9 @@
 from typing import Any
 
 from src.runtime.conversation import append_turn, get_history
+from src.runtime.prompt import compose
 from src.runtime.tools import Tool, ToolRegistry, run_tool_loop
+from src.runtime.untrusted import UNTRUSTED_CONTENT_RULE
 
 ASK_TOPIC = "main-agent"
 
@@ -47,7 +49,7 @@ NO_LOOKUP_TOOL = Tool(
     handler=_no_lookup_needed,
 )
 
-MAIN_AGENT_PROMPT = """
+MAIN_AGENT_ROLE = """
 你是 noahwang 的个人助理，管着他的跑步训练、比赛照片和厨房。
 
 你有一组工具，分两类：查数据的，和执行动作的。想清楚该用哪个再调。
@@ -76,6 +78,8 @@ MAIN_AGENT_PROMPT = """
 - 简短。用户问一个数，就先给那个数，再补一两句相关的。
 - 需要用户提供信息才能继续时，就直接问他，一次别问超过两个问题。
 """.strip()
+
+MAIN_AGENT_PROMPT = compose(MAIN_AGENT_ROLE, UNTRUSTED_CONTENT_RULE)
 
 
 async def answer_open_question(

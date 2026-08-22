@@ -2,11 +2,13 @@ import asyncio
 import inspect
 import json
 import os
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from src.runtime.llm import complete_with_tools
+from src.runtime.trace import log_event
 from src.runtime.untrusted import wrap as wrap_untrusted
 
 
@@ -147,11 +149,18 @@ async def run_tool_loop(
             arguments = _parse_arguments(call.function.arguments)
             # 日志打在执行**之前**。打在之后的话，挂住的工具在日志里完全看不见——
             # 只能看到进了循环，然后没有下文，排查时根本不知道卡在哪一个工具上。
+            log_event(
+                "tool_call",
+                round=round_index,
+                name=call.function.name,
+                arguments=json.dumps(arguments, ensure_ascii=False)[:200],
+            )
             if log is not None:
                 log(
                     f"tool_call round={round_index} name={call.function.name} "
                     f"arguments={arguments}"
                 )
+            started = time.monotonic()
 
             tool = registry.get(call.function.name)
             if tainted and tool is not None and tool.writes:
@@ -166,6 +175,7 @@ async def run_tool_loop(
                         "这类写操作。如实告诉用户：请单独发一条消息来做这件事。"
                     )
                 }
+                log_event("write_blocked_after_untrusted", name=call.function.name)
                 if log is not None:
                     log(f"write_blocked_after_untrusted name={call.function.name}")
                 messages.append(
@@ -192,9 +202,17 @@ async def run_tool_loop(
                         "这个数据源现在拿不到，别等它，如实告诉用户。"
                     )
                 }
+                log_event("tool_timeout", round=round_index, name=call.function.name)
                 if log is not None:
                     log(f"tool_timeout round={round_index} name={call.function.name}")
             content = _serialize_result(result)
+            log_event(
+                "tool_result",
+                name=call.function.name,
+                elapsed_ms=int((time.monotonic() - started) * 1000),
+                chars=len(content),
+                untrusted=bool(tool is not None and tool.returns_untrusted),
+            )
             if tool is not None and tool.returns_untrusted:
                 # 外部内容必须带边界标签进上下文，否则模型分不出
                 # 「这是资料」和「这是指令」。

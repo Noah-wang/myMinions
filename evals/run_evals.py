@@ -105,6 +105,19 @@ def run_conversation_persistence_suite() -> tuple[dict[str, float], list[Any], d
     return metrics, results, spec
 
 
+def run_prompt_injection_suite() -> tuple[dict[str, float], list[Any], dict[str, Any]]:
+    """纯本地评测：假模型驱动真实循环，不调外部服务。"""
+    import prompt_injection
+
+    spec = _load_json(ROOT_DIR / "evals" / "specs" / "prompt_injection.json")
+    dataset = _load_json(ROOT_DIR / spec["dataset"])
+
+    defang = [prompt_injection.judge_defang(c) for c in dataset["defang"]]
+    gate = [prompt_injection.judge_write_gate(c) for c in dataset["write_gate"]]
+    metrics = prompt_injection.score_results(defang, gate)
+    return metrics, defang + gate, spec
+
+
 def _print_suite_result(
     suite_name: str,
     metrics: dict[str, float],
@@ -150,6 +163,13 @@ def main() -> None:
         _print_suite_result(
             "conversation_persistence", conv_metrics, conv_results, conv_spec
         )
+        and passed
+    )
+
+    print()
+    inj_metrics, inj_results, inj_spec = run_prompt_injection_suite()
+    passed = (
+        _print_suite_result("prompt_injection", inj_metrics, inj_results, inj_spec)
         and passed
     )
 

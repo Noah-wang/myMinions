@@ -5,6 +5,13 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
+from src.runtime.trace import (
+    log_event,
+    log_prompts_enabled,
+    prompt_digest,
+    record_usage,
+)
+
 
 def _client() -> AsyncOpenAI:
     api_key = os.getenv("DEEPSEEK_API_KEY")
@@ -21,6 +28,32 @@ def _model() -> str:
     return os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
 
+def _observe(kind: str, messages: Sequence[dict[str, Any]], response: Any) -> None:
+    """记录一次模型调用的用量和 Prompt 指纹。
+
+    默认只记指纹不记明文：Prompt 里有成绩、伤病、目标这些个人数据，
+    而服务器日志是 journalctl 里的明文。需要复现异常输出时用 LOG_PROMPTS=1 打开。
+    """
+    serialized = json.dumps(list(messages), ensure_ascii=False, default=str)
+    log_event(
+        f"{kind}_request",
+        model=_model(),
+        messages=len(messages),
+        chars=len(serialized),
+        digest=prompt_digest(serialized),
+    )
+    if log_prompts_enabled():
+        log_event(f"{kind}_prompt", body=serialized[:8000])
+
+    usage = getattr(response, "usage", None)
+    if usage is not None:
+        record_usage(
+            _model(),
+            int(getattr(usage, "prompt_tokens", 0) or 0),
+            int(getattr(usage, "completion_tokens", 0) or 0),
+        )
+
+
 async def complete_text(
     system_prompt: str,
     user_prompt: str,
@@ -34,6 +67,7 @@ async def complete_text(
         model=_model(),
         messages=messages,
     )
+    _observe("text", messages, response)
 
     content = response.choices[0].message.content
     if not content:
@@ -69,6 +103,8 @@ async def complete_with_tools(
             raise
         kwargs["tool_choice"] = "auto"
         response = await _client().chat.completions.create(**kwargs)
+
+    _observe("tools", messages, response)
     return response.choices[0].message
 
 
@@ -81,6 +117,8 @@ async def complete_json(system_prompt: str, user_prompt: str) -> dict[str, Any]:
         ],
         response_format={"type": "json_object"},
     )
+    _observe("json", [{"role": "system", "content": system_prompt},
+                      {"role": "user", "content": user_prompt}], response)
 
     content = response.choices[0].message.content
     if not content:

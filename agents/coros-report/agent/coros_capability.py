@@ -242,6 +242,8 @@ def build_coros_capability() -> Capability:
                 # 但 knowledge 内部会按 read_only 裁掉那个写工具
                 writes=True,
                 read_only_safe=True,
+                # 回答里会带上检索到的书籍原文和视频字幕
+                returns_untrusted=True,
                 argument_hint="用户的原话",
             ),
             TextCommand(
