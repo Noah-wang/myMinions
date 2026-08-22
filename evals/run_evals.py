@@ -93,6 +93,18 @@ def _metric_threshold(spec: dict[str, Any], metric_name: str) -> float:
     return float(spec["metrics"][metric_name]["threshold"])
 
 
+def run_conversation_persistence_suite() -> tuple[dict[str, float], list[Any], dict[str, Any]]:
+    """纯本地评测：临时目录 + 桩压缩，不调模型也不碰真实 data/。"""
+    import conversation_persistence
+
+    spec = _load_json(ROOT_DIR / "evals" / "specs" / "conversation_persistence.json")
+    dataset = _load_json(ROOT_DIR / spec["dataset"])
+
+    results = [conversation_persistence.judge_case(case) for case in dataset]
+    metrics = conversation_persistence.score_results(results)
+    return metrics, results, spec
+
+
 def _print_suite_result(
     suite_name: str,
     metrics: dict[str, float],
@@ -129,6 +141,15 @@ def main() -> None:
     photo_metrics, photo_results, photo_spec = run_photo_memory_suite()
     passed = (
         _print_suite_result("photo_memory", photo_metrics, photo_results, photo_spec)
+        and passed
+    )
+
+    print()
+    conv_metrics, conv_results, conv_spec = run_conversation_persistence_suite()
+    passed = (
+        _print_suite_result(
+            "conversation_persistence", conv_metrics, conv_results, conv_spec
+        )
         and passed
     )
 

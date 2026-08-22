@@ -3,6 +3,7 @@ from pathlib import Path
 import discord
 
 from photo_intent import classify_photo_intent
+from photo_read_tools import PHOTO_READ_TOOLS
 from photo_store import (
     append_photos,
     find_group,
@@ -320,7 +321,17 @@ def build_photo_capability() -> Capability:
         description="保存和检索 Discord 上传的比赛照片，并追问比赛日期、成绩等元数据。",
         channel_env_name="DISCORD_RUNNING_CHANNEL_ID",
         text_commands=(
-            TextCommand("photo", "保存或检索照片", _photo, aliases=("photos",)),
+            TextCommand(
+                "photo",
+                "保存、追加、补充信息、检索或合并比赛照片分组",
+                _photo,
+                aliases=("photos",),
+                # 保存和合并都会改数据，但能力内部按 read_only 走只读分支
+                writes=True,
+                read_only_safe=True,
+                argument_hint="用户的原话，照片能力内部自己做意图识别",
+            ),
         ),
         startup_handlers=(_restore_pending,),
+        read_tools=PHOTO_READ_TOOLS,
     )

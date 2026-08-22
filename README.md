@@ -14,11 +14,19 @@
 
 运行时被拆成可复用的主 Agent 层和领域 Capability。Discord 消息从 `src/bot/discord_bot.py` 进入，Web Demo 从 `src/api/web_server.py` 进入，主控层负责自然语言路由、权限隔离和命令分发，具体业务由已注册的 capability 执行。
 
+**自然语言消息直接进主 Agent 循环**（`src/ask.py` + `src/runtime/tools.py`）：模型拿到当前频道可用的工具表，自己决定查什么、执行什么，工具结果回灌之后再决定下一步，最后用自己的话回答。关键在于决定发生在**看到数据之后**——分类器只能在看到任何数据之前猜一次，猜错了也没有第二次机会。
+
+`!coros-pb` 这类显式命令走快速通道，绕过循环直接执行：用户打命令就是要确定的输出。原来的分类器保留在 `MAIN_AGENT_LOOP_ENABLED` 开关后面作为回退。
+
+能力提供两类东西给循环：`read_tools` 是结构化取数，`text_commands` 被包装成执行动作的工具（命令处理器往频道发消息，包装时给它一个 `send` 写进缓冲区的上下文，缓冲区内容作为工具返回值）。权限挂在命令自己身上（`writes` / `read_only_safe`），只读入口构造工具表时直接跳过写工具——模型看不见的工具不可能被调用。
+
 ## 多轮对话
 
 `src/runtime/conversation.py` 提供进程内的多轮会话历史，保留最近 6 轮消息，让 Agent 在追问之后能承接用户的回答，而不是把答案当成一次全新的提问。
 
-会话按来源隔离：Discord 用频道 ID，Web 用前端 `sessionStorage` 生成的 session id。历史只存在内存中，进程重启即清空。
+会话按来源隔离：Discord 用频道 ID，Web 用前端 `sessionStorage` 生成的 session id。
+
+历史落在 `data/conversations/` 下的 JSONL 日志里，**只追加、不改写**，内存里的会话是这份日志的一个视图。进程重启后按日志重建；压缩只把老消息移出内存窗口并写一条覆盖标记，日志里的原文一行不删，`read_full_history()` 可以完整取回。会话边界（闲置超时后重新开始）在重放时按相邻记录的时间间隔推断，不需要额外标记。
 
 ## Web 控制台
 

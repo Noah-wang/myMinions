@@ -11,6 +11,7 @@ from activity_browser import (
 from feelings import list_recent_feelings, record_feeling
 from fit_archive import archive_fit_for_activities, render_route_map_for_activity
 from knowledge import answer_running_question
+from coros_read_tools import COROS_READ_TOOLS
 from personal_bests import format_personal_bests
 from src.runtime.capability import Capability, CommandContext, TextCommand
 from video_knowledge import import_running_video_knowledge
@@ -186,20 +187,37 @@ def build_coros_capability() -> Capability:
         name="coros-report",
         description="读取 COROS 运动数据，生成训练报告，回答跑步问题，并记录主观感受。",
         channel_env_name="DISCORD_RUNNING_CHANNEL_ID",
+        read_tools=COROS_READ_TOOLS,
         text_commands=(
-            TextCommand("coros", "生成 COROS 运动报告", _coros_report),
-            TextCommand("coros-tools", "列出 COROS MCP 工具", _coros_tools),
+            TextCommand(
+                "coros",
+                "生成 COROS 运动报告",
+                _coros_report,
+                argument_hint=(
+                    "用户的原话。默认分析最新一次运动，"
+                    "想分析指定的某一条要改用 coros-activity。"
+                ),
+            ),
+            TextCommand(
+                "coros-tools",
+                "列出 COROS MCP 工具",
+                _coros_tools,
+                # 运维用的自检命令，模型没有理由主动调它
+                expose_as_tool=False,
+            ),
             TextCommand(
                 "coros-list",
-                "列出 COROS 运动记录摘要",
+                "列出 COROS 运动记录摘要，输出带编号，供用户挑选某一条",
                 _coros_list,
                 aliases=("coros-activities",),
+                argument_hint="时间范围或条数，例如「最近 30 天」，可留空",
             ),
             TextCommand(
                 "coros-activity",
-                "选择一条 COROS 运动记录生成报告",
+                "分析用户从列表里选中的某一条运动并生成报告",
                 _coros_activity,
                 aliases=("coros-select",),
+                argument_hint="用户的原话，例如「分析第 1 条」「第 3 条重点看心率」",
             ),
             TextCommand(
                 "coros-pb",
@@ -209,22 +227,38 @@ def build_coros_capability() -> Capability:
             ),
             TextCommand(
                 "coros-fit-sync",
-                "手动同步 COROS FIT 原始文件",
+                "把 COROS 原始 FIT 文件下载归档到服务器",
                 _coros_fit_sync,
                 aliases=("fit-sync",),
+                # 会往服务器磁盘写文件
+                writes=True,
+                argument_hint="时间范围和条数，可留空",
             ),
-            TextCommand("running", "基于跑步书籍回答训练问题", _running_ask),
+            TextCommand(
+                "running",
+                "基于跑步书籍和视频知识库回答训练理论问题，也接收用户补充的长期档案",
+                _running_ask,
+                # 会把用户提到的年龄、成绩、目标写进长期档案，
+                # 但 knowledge 内部会按 read_only 裁掉那个写工具
+                writes=True,
+                read_only_safe=True,
+                argument_hint="用户的原话",
+            ),
             TextCommand(
                 "running-video",
                 "把 B站跑步长视频字幕导入跑步知识库",
                 _running_video,
                 aliases=("running-import-video",),
+                writes=True,
+                argument_hint="B站链接或 BV 号，必须是用户真的给出来的",
             ),
             TextCommand(
                 "feel",
                 "记录运动后的主观感受",
                 _record_feeling,
                 aliases=("feeling",),
+                writes=True,
+                argument_hint="用户描述的感受原话",
             ),
             TextCommand(
                 "feelings",
@@ -233,10 +267,18 @@ def build_coros_capability() -> Capability:
                 aliases=("feeling-list",),
             ),
             TextCommand(
-                "coros-auto-check", "手动检查是否有新的 COROS 运动", _auto_check
+                "coros-auto-check",
+                "手动检查是否有新的 COROS 运动",
+                _auto_check,
+                writes=True,
+                expose_as_tool=False,
             ),
             TextCommand(
-                "coros-auto-report", "强制对最新一条 COROS 运动生成报告", _auto_report
+                "coros-auto-report",
+                "强制对最新一条 COROS 运动生成报告",
+                _auto_report,
+                writes=True,
+                expose_as_tool=False,
             ),
         ),
         startup_handlers=(register_coros_auto_report,),

@@ -124,8 +124,18 @@ def build_kitchen_capability() -> Capability:
         text_commands=(
             TextCommand(
                 "kitchen",
-                "管理菜谱和采购清单",
+                "管理菜谱、采购清单、库存和临期提醒",
                 _kitchen,
+                # 子命令里既有只读的 pantry，也有写库存的 bought，
+                # 粗粒度的 writes 表达不了，所以按参数逐条判断
+                writes=True,
+                read_only_safe=True,
+                argument_hint=(
+                    "必须是下面之一："
+                    "add <B站链接或BV号> / recipes / plan <菜谱ID或菜名> / "
+                    "shopping / remove-shopping <食材> / bought <食材> <数量> / "
+                    "use <食材> <数量> / pantry / today / expiring"
+                ),
             ),
         ),
     )

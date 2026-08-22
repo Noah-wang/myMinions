@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from src.ask import answer_open_question
 from src.registry import CapabilityRegistry, get_registry
 from src.runtime.capability import CommandContext, RuntimeAttachment
 from src.runtime.conversation import (
@@ -15,6 +16,7 @@ from src.runtime.conversation import (
     get_pending_questions,
 )
 from src.runtime.llm import complete_json
+from src.runtime.tools import Tool
 
 
 ROUTER_SYSTEM_PROMPT = """
@@ -24,7 +26,7 @@ ROUTER_SYSTEM_PROMPT = """
 
 返回格式：
 {
-  "command": "coros | coros-tools | coros-list | coros-activity | coros-pb | coros-fit-sync | running | running-video | feel | feelings | kitchen | photo | discord-admin | none",
+  "command": "ask | coros | coros-tools | coros-list | coros-activity | coros-pb | coros-fit-sync | running | running-video | feel | feelings | kitchen | photo | discord-admin | none",
   "argument": "传给命令的参数",
   "confidence": 0.0,
   "reason": "一句很短的原因"
@@ -32,6 +34,13 @@ ROUTER_SYSTEM_PROMPT = """
 
 规则：
 - 只能选择用户提示中列出的 allowed_commands。
+- command = "ask" 是开放式提问的出口，argument 保留用户原话。
+  当用户问的是**关于他自己数据的问题**，而答案需要跨来源查、或者不属于
+  任何一个具体命令时，选 ask。例如「我一共跑过几场比赛」「我今年跑了多少公里」
+  「我最好的成绩是哪场比赛跑的」「我离目标还差多少」。
+  这些问题的共同点是：用户要的是一个答案，不是一份报告、一个列表或一个菜单。
+- 有具体命令能精确覆盖时优先用具体命令；只有在没有命令能直接回答时才用 ask。
+  用户说「列出运动记录」要的就是那个列表，选 coros-list 而不是 ask。
 - 如果用户意图不明确，返回 command = "none"。
 - 如果用户只是闲聊、感谢、测试、打招呼，返回 command = "none"。
 - 不要编造用户没有提供的食材、数量、视频链接、菜谱 ID 或训练问题。
@@ -162,6 +171,18 @@ class MainAgentOrchestrator:
             argument: 指令参数（默认为空）。
         """
         if not self.is_allowed_for_command(channel.id, command_name):
+            return True
+
+        if command_name == "ask":
+            await self._handle_ask(
+                self._command_context(
+                    client,
+                    channel,
+                    attachments=attachments,
+                    message=message,
+                ),
+                argument,
+            )
             return True
 
         if command_name in {"discord-admin", "discord"}:
@@ -305,6 +326,19 @@ class MainAgentOrchestrator:
             self._log(f"pending_answer_dispatch channel_id={channel.id} command=running")
             return await self.dispatch_command(client, channel, "running", stripped, message=message)
 
+        # 自然语言直接进循环。分类器不再是大门——它在看到任何数据之前就要
+        # 决定走哪条路，而这个决定本身没有推理能力可用。
+        if self._main_agent_loop_enabled():
+            self._log(f"main_agent_loop channel_id={channel.id}")
+            await self._handle_ask(
+                self._command_context(
+                    client, channel, attachments=attachments, message=message
+                ),
+                stripped,
+                client=client,
+            )
+            return True
+
         try:
             route = await self._route_natural_language(channel.id, stripped)
         except Exception as exc:
@@ -324,6 +358,15 @@ class MainAgentOrchestrator:
                 route.argument,
                 attachments,
                 message,
+            )
+
+        # 路由失败不代表答不了。原来这里直接打印命令菜单，把「分类器挑不出」
+        # 当成了「我不知道」——但用户问的往往只是一个跨来源的普通问题。
+        # 有只读工具可用时先让主 Agent 自己试着回答，菜单退到最后一步。
+        if self._read_tools_for_channel(channel.id):
+            self._log(f"natural_language_no_route_ask channel_id={channel.id}")
+            return await self.dispatch_command(
+                client, channel, "ask", stripped, attachments, message
             )
 
         if self.is_capabilities_channel(channel.id):
@@ -769,6 +812,8 @@ class MainAgentOrchestrator:
         ):
             if self.is_allowed_for_command(channel_id, command_name):
                 commands.append(command_name)
+        if self._read_tools_for_channel(channel_id):
+            commands.append("ask")
         return tuple(commands)
 
     def _build_router_prompt(
@@ -794,6 +839,10 @@ class MainAgentOrchestrator:
             "kitchen": "处理厨房助手：B站菜谱、采购清单、库存、消耗、过期和今日推荐。",
             "photo": "处理照片记忆：保存 Discord 上传的图片附件，或按事件、地点、比赛名检索并发送照片。",
             "discord-admin": "主 Agent 的 Discord 管理工具：修改服务器头像或图标。",
+            "ask": (
+                "开放式提问：主 Agent 自己查用户的比赛记录、训练记录、PB、"
+                "长期档案和知识库，然后直接回答，而不是产出固定格式的报告或列表。"
+            ),
         }
         allowed_text = "\n".join(
             f"- {name}: {command_descriptions[name]}" for name in allowed_commands
@@ -832,7 +881,7 @@ User message:
             argument = ""
         argument = argument.strip()
 
-        if command_name in {"coros", "coros-activity", "coros-fit-sync", "running", "feel"} and not argument:
+        if command_name in {"ask", "coros", "coros-activity", "coros-fit-sync", "running", "feel"} and not argument:
             argument = original_content
 
         if command_name in {"coros-tools", "coros-pb"}:
@@ -862,6 +911,161 @@ User message:
             reason = ""
 
         return NaturalLanguageRoute(command_name, argument, confidence, reason)
+
+    def _command_tool(
+        self,
+        command: Any,
+        client: object,
+        channel: MessageChannel,
+        read_only: bool,
+        attachments: tuple[RuntimeAttachment, ...],
+        message: object | None,
+    ) -> Tool:
+        """把一条文本命令包装成循环可以调用的工具。
+
+        命令处理器的签名是「往频道发消息，无返回值」，工具要的是「返回值给模型」。
+        这两个签名不兼容，硬改的话 14 个处理器全要重写。
+
+        所以这里给它一个 send 会写进缓冲区的 CommandContext：能力层一行不用改，
+        执行完把缓冲区当返回值交给模型。发文件那种直接走 channel.send 的副作用
+        照旧发生——照片检索仍然会把图片发到频道里，模型拿到的是文字摘要。
+        """
+
+        async def handler(argument: str = "") -> str:
+            argument = argument.strip()
+            # 只读入口的兜底校验。工具表已经按 writes 裁过一遍，
+            # 但 kitchen 这种子命令有读有写的必须按参数再判一次。
+            if read_only and not self._is_read_only_command(command.name, argument):
+                return f"{command.name} 在只读入口不可用，这个操作要在 Discord 里做。"
+
+            buffer: list[str] = []
+
+            async def capture(text: str) -> None:
+                if text and text.strip():
+                    buffer.append(text.strip())
+
+            context = CommandContext(
+                client=client,
+                channel=channel,
+                send=capture,
+                send_chunks=capture,
+                message=message,
+                conversation_id=self._conversation_id(channel),
+                read_only=read_only,
+                attachments=attachments,
+            )
+            await command.handler(context, argument)
+            return "\n\n".join(buffer) or f"{command.name} 执行完成，没有输出。"
+
+        description = command.description
+        if command.argument_hint:
+            description = f"{description}。参数：{command.argument_hint}"
+
+        return Tool(
+            name=command.name,
+            description=description,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "argument": {
+                        "type": "string",
+                        "description": command.argument_hint or "传给这个动作的参数，可留空",
+                    }
+                },
+                "required": [],
+            },
+            handler=handler,
+        )
+
+    def _loop_tools(
+        self,
+        client: object,
+        channel: MessageChannel,
+        read_only: bool = False,
+        attachments: tuple[RuntimeAttachment, ...] = (),
+        message: object | None = None,
+    ) -> tuple[Tool, ...]:
+        """当前频道下，主 Agent 循环能用的全部工具。
+
+        两类：能力交上来的只读工具（结构化取数），以及包装成工具的文本命令（执行动作）。
+        频道隔离和只读裁剪都在这里做——**权限决定谁进工具表，而不是事后拦截**。
+        模型看不见的工具就不可能调用它。
+        """
+        tools: list[Tool] = list(self._read_tools_for_channel(channel.id))
+
+        for channel_env_name, command in self._registry.tool_commands():
+            if channel_env_name is not None and not self._is_allowed_channel(
+                channel.id, channel_env_name
+            ):
+                continue
+            if read_only and command.writes and not command.read_only_safe:
+                continue
+            tools.append(
+                self._command_tool(
+                    command, client, channel, read_only, attachments, message
+                )
+            )
+        return tuple(tools)
+
+    def _read_tools_for_channel(self, channel_id: int) -> tuple[Any, ...]:
+        """当前频道能用的只读工具。
+
+        频道隔离照旧：厨房的工具不会出现在跑步频道里。跑步和照片两个能力
+        绑的是同一个频道，所以在那里问「跑过几场比赛」时，
+        比赛记录和训练记录会同时在手边——这正是这个问题需要的。
+        """
+        tools = []
+        for channel_env_name, tool in self._registry.read_tools():
+            if channel_env_name is None or self._is_allowed_channel(
+                channel_id, channel_env_name
+            ):
+                tools.append(tool)
+        return tuple(tools)
+
+    async def _handle_ask(
+        self,
+        context: CommandContext,
+        question: str,
+        client: object | None = None,
+    ) -> None:
+        """主 Agent 循环：模型自己查数据、自己决定动作、自己组织答案。"""
+        question = question.strip()
+        if not question:
+            await context.send("你想问什么？")
+            return
+
+        tools = self._loop_tools(
+            client if client is not None else context.client,
+            context.channel,
+            read_only=context.read_only,
+            attachments=context.attachments,
+            message=context.message,
+        )
+        if not tools:
+            await context.send("这个频道没有可用的能力。")
+            return
+
+        try:
+            answer = await answer_open_question(
+                question,
+                tools,
+                conversation_id=context.conversation_id,
+                log=self._log,
+            )
+        except Exception as exc:
+            await self._send_error(context.channel, "回答失败", exc)
+            self._log(f"ask_failed error={exc}")
+            return
+        await context.send_chunks(answer)
+
+    def _main_agent_loop_enabled(self) -> bool:
+        """自然语言是否直接进主 Agent 循环。
+
+        关掉就退回原来的「分类器挑一个命令」路径。这是个回退开关：
+        循环模式下延迟和成本都更高，万一线上表现不好要能一键切回去。
+        """
+        value = os.getenv("MAIN_AGENT_LOOP_ENABLED", "true")
+        return value.lower() not in {"0", "false", "no", "off"}
 
     def _natural_language_routing_enabled(self) -> bool:
         """检查环境变量中是否启用了自然语言路由。"""

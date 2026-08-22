@@ -44,10 +44,14 @@ async def complete_text(
 async def complete_with_tools(
     messages: Sequence[dict[str, Any]],
     tools: Sequence[dict[str, Any]] | None = None,
+    tool_choice: str = "auto",
 ) -> Any:
     """发一轮带工具的对话，返回模型的原始 message。
 
     返回的 message 可能带 tool_calls，也可能只有 content，由调用方的循环处理。
+
+    tool_choice="required" 强制这一轮必须调工具。用它来保证模型不会
+    拿对话历史里自己上一轮说过的话当数据源——那样它会连没查过的细节一起编出来。
     """
     kwargs: dict[str, Any] = {
         "model": _model(),
@@ -55,9 +59,16 @@ async def complete_with_tools(
     }
     if tools:
         kwargs["tools"] = list(tools)
-        kwargs["tool_choice"] = "auto"
+        kwargs["tool_choice"] = tool_choice
 
-    response = await _client().chat.completions.create(**kwargs)
+    try:
+        response = await _client().chat.completions.create(**kwargs)
+    except Exception:
+        # 不是所有服务端都支持 required。退回 auto 总比整轮失败好。
+        if not tools or tool_choice == "auto":
+            raise
+        kwargs["tool_choice"] = "auto"
+        response = await _client().chat.completions.create(**kwargs)
     return response.choices[0].message
 
 

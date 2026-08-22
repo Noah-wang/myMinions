@@ -1,14 +1,28 @@
+import asyncio
 import inspect
 import json
+import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from src.runtime.llm import complete_with_tools
+from src.runtime.untrusted import wrap as wrap_untrusted
 
 
 DEFAULT_MAX_ROUNDS = 4
 MAX_RESULT_CHARS = 4000
+# 单个工具的执行上限。整轮对话最坏是 max_rounds × 这个值，
+# 所以它必须明显小于用户愿意等的时间。
+DEFAULT_TOOL_TIMEOUT_SECONDS = 75
+
+
+def _tool_timeout_seconds() -> float:
+    value = os.getenv("TOOL_TIMEOUT_SECONDS", str(DEFAULT_TOOL_TIMEOUT_SECONDS))
+    try:
+        return max(float(value), 5.0)
+    except ValueError:
+        return float(DEFAULT_TOOL_TIMEOUT_SECONDS)
 
 
 @dataclass(frozen=True)
@@ -17,6 +31,12 @@ class Tool:
     description: str
     parameters: dict[str, Any]
     handler: Callable[..., Any]
+
+    # 这个工具会不会改变状态。
+    writes: bool = False
+    # 这个工具的返回值里含有第三方能控制的文本（书籍原文、视频字幕、外部接口）。
+    # 一旦这种内容进了上下文，本轮就不再允许调用写工具——见 run_tool_loop。
+    returns_untrusted: bool = False
 
     def schema(self) -> dict[str, Any]:
         return {
@@ -35,6 +55,9 @@ class ToolRegistry:
 
     def schemas(self) -> list[dict[str, Any]]:
         return [tool.schema() for tool in self._tools.values()]
+
+    def get(self, name: str) -> Tool | None:
+        return self._tools.get(name)
 
     async def execute(self, name: str, arguments: dict[str, Any]) -> Any:
         tool = self._tools.get(name)
@@ -76,6 +99,7 @@ async def run_tool_loop(
     history: Sequence[dict[str, str]] = (),
     max_rounds: int = DEFAULT_MAX_ROUNDS,
     log: Callable[[str], None] | None = None,
+    force_first_tool: bool = False,
 ) -> str:
     """跑一轮完整的工具调用循环，返回模型的最终文本回答。
 
@@ -87,8 +111,15 @@ async def run_tool_loop(
     messages.extend(dict(message) for message in history)
     messages.append({"role": "user", "content": user_prompt})
 
+    # 本轮上下文里是否已经混入了第三方能控制的文本。一旦为真就不再允许写操作。
+    tainted = False
+
     for round_index in range(max_rounds):
-        message = await complete_with_tools(messages, registry.schemas())
+        # 第一轮强制调工具，是为了挡住「拿历史里自己上一轮的回答当数据源」。
+        # 那种情况下模型不查就答，还会把没查过的字段一起编出来，
+        # 而且提示词里写「必须查」是拦不住的——试过，第三轮就破功了。
+        choice = "required" if force_first_tool and round_index == 0 else "auto"
+        message = await complete_with_tools(messages, registry.schemas(), choice)
         tool_calls = getattr(message, "tool_calls", None)
 
         if not tool_calls:
@@ -114,18 +145,64 @@ async def run_tool_loop(
 
         for call in tool_calls:
             arguments = _parse_arguments(call.function.arguments)
-            result = await registry.execute(call.function.name, arguments)
+            # 日志打在执行**之前**。打在之后的话，挂住的工具在日志里完全看不见——
+            # 只能看到进了循环，然后没有下文，排查时根本不知道卡在哪一个工具上。
             if log is not None:
                 log(
                     f"tool_call round={round_index} name={call.function.name} "
                     f"arguments={arguments}"
                 )
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": call.id,
-                    "content": _serialize_result(result),
+
+            tool = registry.get(call.function.name)
+            if tainted and tool is not None and tool.writes:
+                # 本轮上下文里已经有第三方能控制的文本了，从这里开始拒绝写操作。
+                #
+                # 这是结构性的，不是靠提示词。注入的典型形态就是「先让你读到一段
+                # 被投毒的资料，再诱导你去写」——把这两步隔开，中间那条链就断了。
+                # 代价是「查完资料顺手记一笔」要分两句说，值得。
+                result = {
+                    "error": (
+                        f"本轮已经读取过外部资料，出于安全不能再执行 {call.function.name} "
+                        "这类写操作。如实告诉用户：请单独发一条消息来做这件事。"
+                    )
                 }
+                if log is not None:
+                    log(f"write_blocked_after_untrusted name={call.function.name}")
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.id,
+                        "content": _serialize_result(result),
+                    }
+                )
+                continue
+
+            try:
+                result = await asyncio.wait_for(
+                    registry.execute(call.function.name, arguments),
+                    timeout=_tool_timeout_seconds(),
+                )
+            except TimeoutError:
+                # 超时要变成给模型的一条结果，而不是抛出去。
+                # 抛出去整轮就废了；返回错误的话模型还能换个工具，
+                # 或者至少如实告诉用户这个数据源现在拿不到。
+                result = {
+                    "error": (
+                        f"{call.function.name} 超时（{_tool_timeout_seconds():.0f} 秒）。"
+                        "这个数据源现在拿不到，别等它，如实告诉用户。"
+                    )
+                }
+                if log is not None:
+                    log(f"tool_timeout round={round_index} name={call.function.name}")
+            content = _serialize_result(result)
+            if tool is not None and tool.returns_untrusted:
+                # 外部内容必须带边界标签进上下文，否则模型分不出
+                # 「这是资料」和「这是指令」。
+                content = wrap_untrusted(content, source=tool.name)
+                tainted = True
+
+            messages.append(
+                {"role": "tool", "tool_call_id": call.id, "content": content}
             )
 
     # 轮数用尽，收掉工具再要一次最终回答，避免无限循环。

@@ -25,6 +25,10 @@
     "invalid_argument_rejection": {
       "description": "Malformed kitchen action arguments are rejected.",
       "threshold": 1.0
+    },
+    "loop_tool_exposure": {
+      "description": "Fraction of cases where the tool table the main-agent loop builds for a channel matches exactly. Permission now lives in the tool table: a write tool that never appears cannot be called. Exact-set matching, because both a missing read tool and an extra write tool are defects.",
+      "threshold": 1.0
     }
   },
   "constraints": [
@@ -32,6 +36,8 @@
     "Do not call Discord, COROS MCP, Bilibili, or the filesystem data stores.",
     "Evaluate the router post-processing and safety gates using fixed LLM route outputs.",
     "Running channel may only route to coros, running, feel, or feelings.",
-    "Cooking channel may only route to kitchen."
+    "Cooking channel may only route to kitchen.",
+    "The ask route is only offered in channels whose capabilities actually contributed read-only tools, so a channel with no data sources cannot fall into open-ended answering.",
+    "Loop-tool cases assert the exact tool set, not a subset: an extra write tool leaking onto the public read-only surface must fail loudly."
   ]
 }

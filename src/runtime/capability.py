@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from src.runtime.tools import Tool
+
 
 SendText = Callable[[str], Awaitable[None]]
 CommandHandler = Callable[["CommandContext", str], Awaitable[None]]
@@ -57,6 +59,19 @@ class TextCommand:
     handler: CommandHandler
     aliases: tuple[str, ...] = ()
 
+    # 这条命令会不会改变状态。主 Agent 的循环按它决定在只读入口暴露哪些工具——
+    # 权限挂在命令自己身上，而不是散落在调用方的 if 里。
+    writes: bool = False
+    # writes=True 但这条命令自己会在只读入口拒掉写操作，所以仍然可以暴露。
+    # kitchen 一条命令下面既有 pantry 也有 bought，粗粒度的 writes 表达不了；
+    # photo 和 running 则是在能力内部按 read_only 裁剪自己的动作。
+    read_only_safe: bool = False
+    # 参数格式说明，给模型看。留空就只用 description。
+    # kitchen 这类子命令很多的能力必须写，否则模型只能猜参数长什么样。
+    argument_hint: str = ""
+    # 有些命令是运维用的手动触发，不该让模型自己去调。
+    expose_as_tool: bool = True
+
     @property
     def names(self) -> tuple[str, ...]:
         return (self.name, *self.aliases)
@@ -69,3 +84,12 @@ class Capability:
     channel_env_name: str | None = None
     text_commands: tuple[TextCommand, ...] = ()
     startup_handlers: tuple[StartupHandler, ...] = field(default_factory=tuple)
+    # 能力主动交给主 Agent 的只读工具，用于开放式提问。
+    #
+    # 主 Agent 需要跨来源回答「我一共跑过几场比赛」这种问题，但它不应该
+    # 直接 import 能力内部的存储——那样 src/ 就反向依赖 agents/ 了。
+    # 所以反过来：能力自己决定愿意暴露什么，主 Agent 只负责收集和调用。
+    #
+    # 只读是硬约束。这些工具在没有认证的公开 Web 入口上也会被调用，
+    # 任何写操作都必须留在各自的命令里，不能出现在这里。
+    read_tools: tuple[Tool, ...] = ()

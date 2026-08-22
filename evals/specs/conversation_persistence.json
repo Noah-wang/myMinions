@@ -1,0 +1,26 @@
+{
+  "name": "conversation_persistence",
+  "version": "1.0.0",
+  "objective": "Guard the append-only conversation journal: history must survive a restart, and compaction must shrink only the in-memory window while the journal keeps every turn.",
+  "unit_under_test": "src/runtime/conversation.py",
+  "dataset": "evals/datasets/conversation_persistence.json",
+  "judge": "evals/judges/conversation_persistence.py",
+  "metrics": {
+    "persistence_correctness": {
+      "description": "Fraction of cases where the rebuilt window, the full on-disk history, and any pending questions all match after a simulated restart. Reloading the module is the restart: the module-level session dict starts empty, so anything read back had to come from the journal.",
+      "threshold": 1.0
+    }
+  },
+  "constraints": [
+    "Each case runs in its own temp directory, so the suite never touches real data/.",
+    "Compaction uses a stub summarizer, not the LLM: the invariant under test is that the journal keeps every turn, not the quality of the summary.",
+    "Idle-timeout cases rewrite timestamps in the journal rather than sleeping, so the suite runs in milliseconds instead of an hour.",
+    "Cases assert the full on-disk history explicitly, not just the window. A bug that silently drops journal lines would still produce a plausible-looking window."
+  ],
+  "baseline": {
+    "measured_at": "2026-08-22",
+    "cases": 6,
+    "persistence_correctness": 1.0,
+    "note": "建立时锁住两个刚修复的缺陷：会话历史只存在内存里，进程重启即清空；以及压缩把老消息换成摘要后原文永久丢失。"
+  }
+}

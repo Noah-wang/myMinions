@@ -13,7 +13,11 @@
       "command": "coros",
       "argument": "我想看一下今天的训练分析"
     },
-    "tags": ["positive", "running", "coros"]
+    "tags": [
+      "positive",
+      "running",
+      "coros"
+    ]
   },
   {
     "id": "running_book_question",
@@ -29,7 +33,11 @@
       "command": "running",
       "argument": "轻松跑应该怎么判断强度"
     },
-    "tags": ["positive", "running", "rag"]
+    "tags": [
+      "positive",
+      "running",
+      "rag"
+    ]
   },
   {
     "id": "running_video_import",
@@ -45,7 +53,11 @@
       "command": "running-video",
       "argument": "BV1Nse7zfE4x"
     },
-    "tags": ["positive", "running", "video_import"]
+    "tags": [
+      "positive",
+      "running",
+      "video_import"
+    ]
   },
   {
     "id": "running_profile_update",
@@ -61,7 +73,11 @@
       "command": "running",
       "argument": "我23岁，身高180cm，体重70kg，全马4:30那次后半程抽筋了"
     },
-    "tags": ["positive", "running", "profile"]
+    "tags": [
+      "positive",
+      "running",
+      "profile"
+    ]
   },
   {
     "id": "running_feeling_note",
@@ -77,7 +93,11 @@
       "command": "feel",
       "argument": "今天腿很沉，RPE 7，左膝有点紧"
     },
-    "tags": ["positive", "running", "feeling"]
+    "tags": [
+      "positive",
+      "running",
+      "feeling"
+    ]
   },
   {
     "id": "running_feelings_list",
@@ -93,7 +113,11 @@
       "command": "feelings",
       "argument": ""
     },
-    "tags": ["positive", "running", "feelings"]
+    "tags": [
+      "positive",
+      "running",
+      "feelings"
+    ]
   },
   {
     "id": "kitchen_purchase_basic",
@@ -109,7 +133,11 @@
       "command": "kitchen",
       "argument": "bought 鸡腿 1000g"
     },
-    "tags": ["positive", "cooking", "purchase"]
+    "tags": [
+      "positive",
+      "cooking",
+      "purchase"
+    ]
   },
   {
     "id": "kitchen_use_item",
@@ -125,7 +153,11 @@
       "command": "kitchen",
       "argument": "use 鸡腿 500g"
     },
-    "tags": ["positive", "cooking", "use"]
+    "tags": [
+      "positive",
+      "cooking",
+      "use"
+    ]
   },
   {
     "id": "kitchen_expiring",
@@ -141,7 +173,11 @@
       "command": "kitchen",
       "argument": "expiring"
     },
-    "tags": ["positive", "cooking", "expiring"]
+    "tags": [
+      "positive",
+      "cooking",
+      "expiring"
+    ]
   },
   {
     "id": "kitchen_bilibili_add",
@@ -157,7 +193,11 @@
       "command": "kitchen",
       "argument": "add https://www.bilibili.com/video/BV1Nse7zfE4x/"
     },
-    "tags": ["positive", "cooking", "recipe"]
+    "tags": [
+      "positive",
+      "cooking",
+      "recipe"
+    ]
   },
   {
     "id": "reject_cross_channel_coros_in_cooking",
@@ -170,7 +210,10 @@
       "reason": "用户请求训练分析"
     },
     "expected_route": null,
-    "tags": ["negative", "cross_channel"]
+    "tags": [
+      "negative",
+      "cross_channel"
+    ]
   },
   {
     "id": "reject_cross_channel_kitchen_in_running",
@@ -183,7 +226,10 @@
       "reason": "用户记录采购食材"
     },
     "expected_route": null,
-    "tags": ["negative", "cross_channel"]
+    "tags": [
+      "negative",
+      "cross_channel"
+    ]
   },
   {
     "id": "reject_low_confidence",
@@ -196,7 +242,10 @@
       "reason": "用户意图不明确"
     },
     "expected_route": null,
-    "tags": ["negative", "low_confidence"]
+    "tags": [
+      "negative",
+      "low_confidence"
+    ]
   },
   {
     "id": "reject_none_chat",
@@ -209,7 +258,10 @@
       "reason": "用户只是打招呼"
     },
     "expected_route": null,
-    "tags": ["negative", "none"]
+    "tags": [
+      "negative",
+      "none"
+    ]
   },
   {
     "id": "reject_invalid_kitchen_argument",
@@ -222,6 +274,124 @@
       "reason": "缺少食材和数量"
     },
     "expected_route": null,
-    "tags": ["negative", "invalid_argument"]
+    "tags": [
+      "negative",
+      "invalid_argument"
+    ]
+  },
+  {
+    "id": "ask_open_question",
+    "channel": "running",
+    "message": "我一共跑过几场比赛",
+    "llm_response": {
+      "command": "ask",
+      "argument": "我一共跑过几场比赛",
+      "confidence": 0.9,
+      "reason": "跨来源的开放式提问"
+    },
+    "expected_route": {
+      "command": "ask",
+      "argument": "我一共跑过几场比赛"
+    },
+    "tags": [
+      "positive",
+      "running",
+      "ask"
+    ],
+    "note": "真实回归：原来被误判成 coros-list，倒出 20 条训练流水"
+  },
+  {
+    "id": "ask_empty_argument_falls_back",
+    "channel": "running",
+    "message": "我离全马目标还差多少",
+    "llm_response": {
+      "command": "ask",
+      "argument": "",
+      "confidence": 0.85,
+      "reason": "开放式提问"
+    },
+    "expected_route": {
+      "command": "ask",
+      "argument": "我离全马目标还差多少"
+    },
+    "tags": [
+      "positive",
+      "running",
+      "ask"
+    ],
+    "note": "argument 空时要回填原话，否则自由问答收到空问题"
+  },
+  {
+    "id": "ask_unavailable_without_read_tools",
+    "channel": "cooking",
+    "message": "我一共跑过几场比赛",
+    "llm_response": {
+      "command": "ask",
+      "argument": "我一共跑过几场比赛",
+      "confidence": 0.9,
+      "reason": "开放式提问"
+    },
+    "expected_route": null,
+    "tags": [
+      "negative",
+      "cross_channel",
+      "ask"
+    ],
+    "note": "厨房能力没有交出只读工具，那个频道就不该有 ask 这个出口"
+  },
+  {
+    "id": "loop_tools_running_readwrite",
+    "kind": "loop_tools",
+    "channel": "running",
+    "read_only": false,
+    "expect_tools": [
+      "get_athlete_profile",
+      "get_personal_bests",
+      "list_recent_activities",
+      "search_running_knowledge",
+      "list_races",
+      "coros",
+      "coros-list",
+      "coros-activity",
+      "coros-pb",
+      "coros-fit-sync",
+      "running",
+      "running-video",
+      "feel",
+      "feelings",
+      "photo"
+    ],
+    "note": "Discord 跑步频道拿到全部工具；coros-tools 和两个 auto 命令是运维用的，不暴露"
+  },
+  {
+    "id": "loop_tools_running_readonly",
+    "kind": "loop_tools",
+    "channel": "running",
+    "read_only": true,
+    "expect_tools": [
+      "get_athlete_profile",
+      "get_personal_bests",
+      "list_recent_activities",
+      "search_running_knowledge",
+      "list_races",
+      "coros",
+      "coros-list",
+      "coros-activity",
+      "coros-pb",
+      "running",
+      "feelings",
+      "photo"
+    ],
+    "note": "公开网页入口：写工具必须根本看不见。模型看不见的工具不可能调用"
+  },
+  {
+    "id": "loop_tools_cooking_isolated",
+    "kind": "loop_tools",
+    "channel": "cooking",
+    "read_only": false,
+    "expect_tools": [
+      "kitchen"
+    ],
+    "note": "频道隔离：厨房频道拿不到任何跑步工具"
   }
 ]

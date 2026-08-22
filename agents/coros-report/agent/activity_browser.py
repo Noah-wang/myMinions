@@ -185,6 +185,20 @@ def _duration_text(record: dict[str, Any]) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+def summarize_activity(record: dict[str, Any]) -> dict[str, str]:
+    """把一条运动记录压成四个字段，给主 Agent 的自由问答用。
+
+    命令的输出是给人看的（带编号、带选择菜单），塞回模型里既占上下文
+    又会诱导它照抄那个格式。这里只给事实。
+    """
+    return {
+        "date": _activity_date(record),
+        "type": _activity_title(record),
+        "distance": _distance_text(record),
+        "duration": _duration_text(record),
+    }
+
+
 def _format_activity_line(index: int, record: dict[str, Any]) -> str:
     return (
         f"{index}. {_activity_date(record)} | {_activity_title(record)} | "
