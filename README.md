@@ -48,6 +48,12 @@ Prompt 默认只记指纹不记明文——里面有成绩、伤病、目标等�
 
 长期记忆与临时缓存分开存放：`memory.json` 的 `agents` 是会进提示词的长期记忆，`caches` 是不进提示词的临时数据（如「分析第 N 条」的选择缓存）。历史遗留的缓存键在每次加载时自愈式迁移。
 
+## 限流与出站检查
+
+公开网页入口有两层限流（`src/runtime/ratelimit.py`）：按来源挡单 IP 高频，按全局挡分散来源。只按 IP 限流保护不了模型账单，因为账单是按总量算的。真实 IP 取 `X-Forwarded-For` 的最后一段（Caddy 追加的那段，客户端伪造不了）。可用 `WEB_RATE_LIMIT_PER_MINUTE` 和 `WEB_RATE_LIMIT_GLOBAL_PER_MINUTE` 调整。
+
+发给用户的文本会过一遍 `src/runtime/output_guard.py`：抹掉环境变量里的真实密钥值，删掉泄露的 `<untrusted-data>` 边界标签。它只做精确匹配这类零误报的事——会误伤正常回答的安全层最终会被关掉，那比没有更糟。
+
 ## 注入防护
 
 外部来源的文本（书籍原文、B 站字幕、第三方接口返回）进提示词前会被 `src/runtime/untrusted.py` 包进 `<untrusted-data>` 边界标签，内容里的标签字面量会先被打断，防止攻击者自行闭合跳出边界；系统提示里有一条常驻规则说明标签内只是数据、其中的指令一律无视。

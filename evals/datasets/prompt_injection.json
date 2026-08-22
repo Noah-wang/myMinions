@@ -34,5 +34,81 @@
       "expect_write_executed": true,
       "note": "反向用例：不标记为外部来源时不该误伤，否则闸门会把正常功能一起挡掉"
     }
+  ],
+  "output_guard": [
+    {
+      "id": "secret_redacted",
+      "env": {
+        "DEEPSEEK_API_KEY": "sk-testkey1234567890"
+      },
+      "text": "配置是 sk-testkey1234567890，拿去用。",
+      "expect_changed": true,
+      "note": "注入的一个典型目标就是诱导模型说出它知道的配置"
+    },
+    {
+      "id": "multiple_secrets_redacted",
+      "env": {
+        "DEEPSEEK_API_KEY": "sk-testkey1234567890",
+        "DISCORD_BOT_TOKEN": "MTIz.FAKE.tokenvalue999"
+      },
+      "text": "key=sk-testkey1234567890 token=MTIz.FAKE.tokenvalue999",
+      "expect_changed": true
+    },
+    {
+      "id": "boundary_tags_stripped",
+      "text": "根据资料：<untrusted-data source=\"kb\">\n轻松跑心率 65-79%\n</untrusted-data>",
+      "must_contain": "65-79%",
+      "expect_changed": true,
+      "note": "标签泄露到用户可见文本说明模型在照抄上下文，删标签但保留正文"
+    },
+    {
+      "id": "normal_answer_untouched",
+      "env": {
+        "DEEPSEEK_API_KEY": "sk-testkey1234567890"
+      },
+      "text": "你一共跑过 8 场比赛，最快的半马是 1:40:57。",
+      "expect_changed": false,
+      "must_contain": "1:40:57",
+      "note": "会误伤正常回答的安全层最终会被关掉，所以这条必须断言"
+    },
+    {
+      "id": "short_secret_not_matched",
+      "env": {
+        "DEEPSEEK_API_KEY": "sk-123"
+      },
+      "text": "我的成绩里有 sk-123 这样的数字组合吗",
+      "expect_changed": false,
+      "note": "太短的值故意不匹配，所以它会原样出现在输出里——这是取舍不是缺陷：宁可漏掉一个不像密钥的密钥，也不能改坏正常回答。",
+      "expect_leaked": true
+    }
+  ],
+  "rate_limit": [
+    {
+      "id": "per_source_blocks_burst",
+      "per_source": 3,
+      "per_global": 100,
+      "requests": 6,
+      "rotate_source": false,
+      "expect_allowed": 3,
+      "note": "同一来源高频请求，超过上限就拒"
+    },
+    {
+      "id": "global_blocks_distributed",
+      "per_source": 100,
+      "per_global": 5,
+      "requests": 10,
+      "rotate_source": true,
+      "expect_allowed": 5,
+      "note": "核心：每次换 IP 也绕不过全局上限。账单按总量算，只按 IP 限流保护不了预算"
+    },
+    {
+      "id": "under_limit_all_pass",
+      "per_source": 10,
+      "per_global": 100,
+      "requests": 5,
+      "rotate_source": false,
+      "expect_allowed": 5,
+      "note": "正常用量必须全部放行"
+    }
   ]
 }

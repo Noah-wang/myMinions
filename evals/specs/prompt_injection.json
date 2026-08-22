@@ -2,7 +2,7 @@
   "name": "prompt_injection",
   "version": "1.0.0",
   "objective": "Guard the two structural defenses against prompt injection: untrusted content cannot escape its boundary tags, and a write tool cannot fire in a turn that already pulled in third-party text.",
-  "unit_under_test": "src/runtime/untrusted.py, src/runtime/tools.py",
+  "unit_under_test": "src/runtime/untrusted.py, src/runtime/tools.py, src/runtime/output_guard.py, src/runtime/ratelimit.py",
   "dataset": "evals/datasets/prompt_injection.json",
   "judge": "evals/judges/prompt_injection.py",
   "metrics": {
@@ -13,12 +13,21 @@
     "write_gate_correctness": {
       "description": "Fraction of cases where the write handler is executed exactly when it should be. Asserts on whether the handler actually ran, not on what the model said: a model can claim it did not write while the write already happened.",
       "threshold": 1.0
+    },
+    "output_guard_correctness": {
+      "description": "Fraction of outbound-text cases where secrets and internal boundary tags are removed and normal answers pass through unchanged. Both directions are asserted: a filter that mangles normal answers gets switched off, which is worse than no filter.",
+      "threshold": 1.0
+    },
+    "rate_limit_correctness": {
+      "description": "Fraction of rate-limit cases allowing exactly the expected number of requests. Includes a distributed case that rotates the source IP on every request: per-IP limits alone do not protect the model bill, only the global cap does.",
+      "threshold": 1.0
     }
   },
   "constraints": [
     "The write-gate cases drive the real run_tool_loop with a scripted fake model, so the defense is tested in the code path that actually runs in production, not in a reimplementation.",
     "One case asserts the gate does NOT fire on trusted sources. A guard that blocks everything would pass a one-sided test while breaking normal use.",
-    "No LLM and no network: this suite runs anywhere and never needs to be skipped."
+    "No LLM and no network: this suite runs anywhere and never needs to be skipped.",
+    "Output-guard cases include a short-secret case that must NOT match: an over-eager redactor would corrupt real answers containing similar character runs."
   ],
   "baseline": {
     "measured_at": "2026-08-22",

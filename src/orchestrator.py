@@ -16,6 +16,7 @@ from src.runtime.conversation import (
     get_pending_questions,
 )
 from src.runtime.llm import complete_json
+from src.runtime.output_guard import sanitize as sanitize_output
 from src.runtime.tools import Tool
 from src.runtime.trace import Span, log_event, new_trace
 
@@ -1208,11 +1209,13 @@ User message:
         上下文中带上 conversation_id，供 Agent 读取多轮对话历史。
         Discord 侧按频道区分会话；Web 侧由 channel 自带的 conversation_id 按浏览器会话区分。
         """
+        # 出站的最后一道检查放在这里，因为 Discord 和网页都从这个方法拿上下文，
+        # 是唯一的收口点。放到各个能力里就得每处都记得加。
         async def send_text(text: str) -> None:
-            await channel.send(text)
+            await channel.send(sanitize_output(text))
 
         async def send_chunks(text: str) -> None:
-            await self._send_chunks(channel, text)
+            await self._send_chunks(channel, sanitize_output(text))
 
         return CommandContext(
             client=client,

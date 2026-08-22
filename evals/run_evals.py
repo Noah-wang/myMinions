@@ -114,8 +114,10 @@ def run_prompt_injection_suite() -> tuple[dict[str, float], list[Any], dict[str,
 
     defang = [prompt_injection.judge_defang(c) for c in dataset["defang"]]
     gate = [prompt_injection.judge_write_gate(c) for c in dataset["write_gate"]]
-    metrics = prompt_injection.score_results(defang, gate)
-    return metrics, defang + gate, spec
+    output = [prompt_injection.judge_output_guard(c) for c in dataset.get("output_guard", [])]
+    rate = [prompt_injection.judge_rate_limit(c) for c in dataset.get("rate_limit", [])]
+    metrics = prompt_injection.score_results(defang, gate, output, rate)
+    return metrics, defang + gate + output + rate, spec
 
 
 def _print_suite_result(

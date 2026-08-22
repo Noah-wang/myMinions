@@ -1,0 +1,218 @@
+[
+  {
+    "id": "holdout_treadmill_value",
+    "question": "天气特别糟糕、或者需要严格控制训练量的时候，在室内器械上跑有什么好处？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "跑步机"
+    ]
+  },
+  {
+    "id": "holdout_injury_alternative",
+    "question": "腿部骨折、完全不能承受冲击的时候，还能做哪些有氧训练？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "游泳",
+      "深水"
+    ]
+  },
+  {
+    "id": "holdout_resistance_training",
+    "question": "在健身房练腿对跑步成绩有没有帮助？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "阻力训练"
+    ]
+  },
+  {
+    "id": "holdout_detraining_diet",
+    "question": "长时间停跑的那段时间，吃的方面要注意什么？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "卡路里",
+      "体重"
+    ]
+  },
+  {
+    "id": "holdout_detraining_speed",
+    "question": "停止训练之后，之前练出来的效果掉得快不快？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "流失",
+      "休整"
+    ]
+  },
+  {
+    "id": "holdout_season_phase_order",
+    "question": "规划一个完整赛季的四个阶段时，应该按什么顺序去考虑？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "阶段一",
+      "阶段四"
+    ]
+  },
+  {
+    "id": "holdout_skip_phase_one",
+    "question": "已经规律跑了一两个月了，还需要从最基础的那个阶段练起吗？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "6个星期",
+      "阶段二"
+    ]
+  },
+  {
+    "id": "holdout_half_vs_full_pace",
+    "question": "半程比赛的配速比全程快多少？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "7~10秒"
+    ]
+  },
+  {
+    "id": "holdout_half_fueling",
+    "question": "跑半程的途中需要补充能量吗？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "肌糖原"
+    ]
+  },
+  {
+    "id": "holdout_stop_hills",
+    "question": "重要比赛前的几周里，要停掉哪一类训练？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "跑坡"
+    ]
+  },
+  {
+    "id": "holdout_race_week_quality",
+    "question": "比赛那一周最后一次强化训练，用什么强度比较合适？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "T强度"
+    ]
+  },
+  {
+    "id": "holdout_fitness_plan_levels",
+    "question": "书里给不同水平的人分了哪几套体能训练计划？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "白色",
+      "金色"
+    ]
+  },
+  {
+    "id": "holdout_800_anaerobic",
+    "question": "专项练 800 米和练长距离，训练重点最大的差别在哪？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "无氧"
+    ]
+  },
+  {
+    "id": "holdout_cross_country_role",
+    "question": "以短距离为主的跑者，参加冬季那种野外长距离赛季有什么用？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "专攻"
+    ]
+  },
+  {
+    "id": "holdout_success_factors",
+    "question": "决定一个跑者最终能跑到什么程度的因素有哪些？哪个最重要？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "天资"
+    ]
+  },
+  {
+    "id": "holdout_bad_coaching",
+    "question": "书里怎么评价那种只管往死里练、指望有人能扛下来的带队方式？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "鸡蛋"
+    ]
+  },
+  {
+    "id": "holdout_mid_distance_needs",
+    "question": "1500 米到 3 公里这个距离的跑者，训练上需要兼顾哪两方面？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "1 500米"
+    ]
+  },
+  {
+    "id": "holdout_race_start_conservative",
+    "question": "比赛开头应该怎么起步？",
+    "expected_kind": "book",
+    "must_contain_any": [
+      "保守"
+    ]
+  },
+  {
+    "id": "holdout_video_interval_sets",
+    "question": "高强度间歇每次做几组，怎么往上加？",
+    "expected_kind": "video",
+    "must_contain_any": [
+      "六组",
+      "十组"
+    ]
+  },
+  {
+    "id": "holdout_video_recovery_hr",
+    "question": "间歇的间隙里，心率要降到什么程度才能开始下一组？",
+    "expected_kind": "video",
+    "must_contain_any": [
+      "60%"
+    ]
+  },
+  {
+    "id": "holdout_video_twice_daily",
+    "question": "一天分成上下午各练一场，会比只练一场效果更好吗？",
+    "expected_kind": "video",
+    "must_contain_any": [
+      "训练间隙"
+    ]
+  },
+  {
+    "id": "holdout_video_duration_study",
+    "question": "每天练三个小时会不会比练一个半小时效果更好？",
+    "expected_kind": "video",
+    "must_contain_any": [
+      "1.5小时",
+      "三小时"
+    ]
+  },
+  {
+    "id": "holdout_video_order_reason",
+    "question": "为什么要先练中央因素再练外周，倒过来行不行？",
+    "expected_kind": "video",
+    "must_contain_any": [
+      "效率"
+    ]
+  },
+  {
+    "id": "holdout_video_strength_placement",
+    "question": "力量训练应该放在哪个阶段，每次做多少？",
+    "expected_kind": "video",
+    "must_contain_any": [
+      "10RM"
+    ]
+  },
+  {
+    "id": "holdout_video_central_timeline",
+    "question": "中央因素这类训练大概要练多久才开始见效？",
+    "expected_kind": "video",
+    "must_contain_any": [
+      "三个月"
+    ]
+  },
+  {
+    "id": "holdout_video_boredom",
+    "question": "持续有氧训练太枯燥了，有什么办法？",
+    "expected_kind": "video",
+    "must_contain_any": [
+      "多样性"
+    ]
+  }
+]

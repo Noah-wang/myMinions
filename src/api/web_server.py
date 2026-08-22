@@ -12,6 +12,9 @@ from urllib.parse import quote, unquote, urlparse
 
 from dotenv import load_dotenv
 
+from src.runtime import ratelimit
+from src.runtime.trace import log_event
+
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 WEB_DIR = ROOT_DIR / "web"
@@ -391,10 +394,38 @@ class WebHandler(BaseHTTPRequestHandler):
             return
         self._serve_static(parsed.path, include_body=include_body)
 
+    def _client_ip(self) -> str:
+        """真实客户端 IP。
+
+        服务跑在 127.0.0.1，前面是 Caddy，所以 client_address 永远是本机。
+        Caddy 会把真实 IP **追加**到 X-Forwarded-For 末尾，因此取最后一段——
+        客户端自己伪造的前缀会被排在前面，取最后一段就伪造不了。
+        """
+        forwarded = self.headers.get("X-Forwarded-For", "")
+        if forwarded:
+            return forwarded.split(",")[-1].strip()
+        return self.client_address[0]
+
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path not in {"/api/chat", "/api/chat/stream"}:
             self._send(*_json_response({"error": "未找到接口"}, HTTPStatus.NOT_FOUND))
+            return
+
+        source = self._client_ip()
+        allowed, retry_after = ratelimit.check(source)
+        if not allowed:
+            log_event("rate_limited", source=source, retry_after=retry_after)
+            status, body, content_type = _json_response(
+                {"error": f"请求太频繁，请 {retry_after} 秒后再试。"},
+                HTTPStatus.TOO_MANY_REQUESTS,
+            )
+            self._send(
+                status,
+                body,
+                content_type,
+                extra_headers={"Retry-After": str(retry_after)},
+            )
             return
 
         try:
@@ -546,10 +577,13 @@ class WebHandler(BaseHTTPRequestHandler):
         body: bytes,
         content_type: str,
         include_body: bool = True,
+        extra_headers: dict[str, str] | None = None,
     ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        for name, value in (extra_headers or {}).items():
+            self.send_header(name, value)
         # 静态资源文件名没有版本号，长缓存会让部署后的一段时间内用户拿到旧前端，
         # 所以统一要求每次回源校验。
         self.send_header(

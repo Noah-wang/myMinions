@@ -103,9 +103,77 @@ def judge_write_gate(case: dict[str, Any]) -> InjectionCaseResult:
     )
 
 
+def judge_output_guard(case: dict[str, Any]) -> InjectionCaseResult:
+    """出站检查：该删的删掉，不该动的一个字都不能改。
+
+    第二类用例和第一类同样重要。会误伤正常回答的安全层最终会被关掉，
+    所以「正常文本原样通过」必须被断言。
+    """
+    import os
+
+    from src.runtime.output_guard import sanitize
+
+    env = case.get("env", {})
+    original = {name: os.environ.get(name) for name in env}
+    os.environ.update(env)
+    try:
+        result = sanitize(case["text"])
+    finally:
+        for name, value in original.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+    actual = {
+        "changed": result != case["text"],
+        "leaked": any(value in result for value in env.values()),
+        "has_tags": OPEN_TAG in result or CLOSE_TAG in result,
+    }
+    # expect_leaked 必须显式声明：太短的值故意不匹配，那时"泄露"就是预期行为。
+    # 无条件断言 leaked=False 会把这个刻意的取舍误判成缺陷。
+    expected = {
+        "changed": case["expect_changed"],
+        "leaked": case.get("expect_leaked", False),
+        "has_tags": False,
+    }
+    if "must_contain" in case:
+        actual["preserved"] = case["must_contain"] in result
+        expected["preserved"] = True
+    return InjectionCaseResult(
+        case_id=case["id"], passed=actual == expected, expected=expected, actual=actual
+    )
+
+
+def judge_rate_limit(case: dict[str, Any]) -> InjectionCaseResult:
+    """限流：按来源挡高频，全局挡分散来源。"""
+    import os
+
+    from src.runtime import ratelimit
+
+    os.environ["WEB_RATE_LIMIT_PER_MINUTE"] = str(case["per_source"])
+    os.environ["WEB_RATE_LIMIT_GLOBAL_PER_MINUTE"] = str(case["per_global"])
+    ratelimit.reset()
+
+    allowed = 0
+    for index in range(case["requests"]):
+        source = f"10.0.0.{index}" if case["rotate_source"] else "1.2.3.4"
+        ok, _ = ratelimit.check(source)
+        allowed += int(ok)
+    ratelimit.reset()
+
+    actual = {"allowed": allowed}
+    expected = {"allowed": case["expect_allowed"]}
+    return InjectionCaseResult(
+        case_id=case["id"], passed=actual == expected, expected=expected, actual=actual
+    )
+
+
 def score_results(
     defang: list[InjectionCaseResult],
     gate: list[InjectionCaseResult],
+    output: list[InjectionCaseResult] | None = None,
+    rate: list[InjectionCaseResult] | None = None,
 ) -> dict[str, float]:
     def _rate(results: list[InjectionCaseResult]) -> float:
         return sum(r.passed for r in results) / len(results) if results else 1.0
@@ -113,4 +181,6 @@ def score_results(
     return {
         "boundary_integrity": _rate(defang),
         "write_gate_correctness": _rate(gate),
+        "output_guard_correctness": _rate(output or []),
+        "rate_limit_correctness": _rate(rate or []),
     }
