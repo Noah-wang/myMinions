@@ -9,13 +9,13 @@ import discord
 
 from src.runtime.trace import new_trace
 
-from fit_archive import archive_fit_for_activities, render_route_map_for_activity
-from shadowrunner_prompt import REPORT_SYSTEM_PROMPT
+from agents.coros_report.fit_archive import archive_fit_for_activities, render_route_map_for_activity
+from agents.coros_report.shadowrunner_prompt import REPORT_SYSTEM_PROMPT
 from src.integrations.coros_mcp import call_coros_tool
 from src.runtime.llm import complete_text
 from src.runtime.memory import format_memory_for_prompt, get_agent_memory, update_agent_memory
 from src.runtime.scheduler import add_interval_job
-from personal_bests import update_personal_bests_from_tool_results
+from agents.coros_report.personal_bests import update_personal_bests_from_tool_results
 
 
 AGENT_NAME = "coros-report"

@@ -1,20 +1,20 @@
 import discord
 
-from agent import list_available_coros_tools
-from graph import generate_coros_graph_report
-from auto_report import check_and_send_coros_auto_report, latest_coros_activity, register_coros_auto_report
-from activity_browser import (
+from agents.coros_report.agent import list_available_coros_tools
+from agents.coros_report.graph import generate_coros_graph_report
+from agents.coros_report.auto_report import check_and_send_coros_auto_report, latest_coros_activity, register_coros_auto_report
+from agents.coros_report.activity_browser import (
     generate_selected_activity_report_for_conversation,
     list_activity_records,
     query_activity_records,
 )
-from feelings import list_recent_feelings, record_feeling
-from fit_archive import archive_fit_for_activities, render_route_map_for_activity
-from knowledge import answer_running_question
-from coros_read_tools import COROS_READ_TOOLS
-from personal_bests import format_personal_bests
+from agents.coros_report.feelings import list_recent_feelings, record_feeling
+from agents.coros_report.fit_archive import archive_fit_for_activities, render_route_map_for_activity
+from agents.coros_report.knowledge import answer_running_question
+from agents.coros_report.coros_read_tools import COROS_READ_TOOLS
+from agents.coros_report.personal_bests import format_personal_bests
 from src.runtime.capability import Capability, CommandContext, TextCommand
-from video_knowledge import import_running_video_knowledge
+from agents.coros_report.video_knowledge import import_running_video_knowledge
 
 
 DEFAULT_REPORT_REQUEST = "分析我最近一次运动，重点看配速、心率、恢复和下一次训练建议。"

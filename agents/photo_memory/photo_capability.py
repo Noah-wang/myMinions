@@ -2,9 +2,9 @@ from pathlib import Path
 
 import discord
 
-from photo_intent import classify_photo_intent
-from photo_read_tools import PHOTO_READ_TOOLS
-from photo_store import (
+from agents.photo_memory.photo_intent import classify_photo_intent
+from agents.photo_memory.photo_read_tools import PHOTO_READ_TOOLS
+from agents.photo_memory.photo_store import (
     append_photos,
     find_group,
     format_photo_summary,

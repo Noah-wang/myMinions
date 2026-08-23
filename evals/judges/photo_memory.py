@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import photo_intent
-import photo_store
+from agents.photo_memory import photo_intent
+from agents.photo_memory import photo_store
 
 
 @dataclass

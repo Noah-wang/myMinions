@@ -4,7 +4,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from running_tools import build_ingest_registry
+from agents.coros_report.running_tools import build_ingest_registry
 from src.integrations.bilibili_subtitle import fetch_bilibili_subtitle
 from src.runtime.tools import run_tool_loop
 
@@ -22,7 +22,7 @@ INGEST_REVIEW_PROMPT = """
 """.strip()
 
 
-ROOT_DIR = Path(__file__).resolve().parents[3]
+from src.runtime.paths import ROOT_DIR  # noqa: E402
 VIDEOS_DIR = ROOT_DIR / "data" / "knowledge" / "coros-report" / "videos"
 INGEST_SCRIPT = ROOT_DIR / "scripts" / "ingest_books.py"
 

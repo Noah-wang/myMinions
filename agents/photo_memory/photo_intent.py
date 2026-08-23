@@ -14,7 +14,7 @@
 import json
 from typing import Any
 
-from photo_store import extract_event, extract_race_date, extract_result
+from agents.photo_memory.photo_store import extract_event, extract_race_date, extract_result
 from src.runtime.llm import complete_json
 
 

@@ -1,4 +1,4 @@
-from kitchen_prompt import RECIPE_EXTRACTION_SYSTEM_PROMPT, build_recipe_extraction_prompt
+from agents.kitchen_assistant.kitchen_prompt import RECIPE_EXTRACTION_SYSTEM_PROMPT, build_recipe_extraction_prompt
 from src.runtime.llm import complete_json
 
 

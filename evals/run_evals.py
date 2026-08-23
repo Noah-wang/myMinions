@@ -7,12 +7,8 @@ from typing import Any
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
-sys.path.insert(0, str(ROOT_DIR / "evals" / "judges"))
-sys.path.insert(0, str(ROOT_DIR / "agents" / "kitchen-assistant" / "agent"))
-sys.path.insert(0, str(ROOT_DIR / "agents" / "coros-report" / "agent"))
-sys.path.insert(0, str(ROOT_DIR / "agents" / "photo-memory" / "agent"))
 
-from natural_language_routing import (  # noqa: E402
+from evals.judges.natural_language_routing import (  # noqa: E402
     CaseResult,
     configure_eval_environment,
     judge_case,
@@ -48,7 +44,7 @@ def run_rag_retrieval_suite() -> tuple[dict[str, float], list[Any], dict[str, An
 
     load_dotenv(ROOT_DIR / ".env")
 
-    import rag_retrieval
+    from evals.judges import rag_retrieval
 
     spec = _load_json(ROOT_DIR / "evals" / "specs" / "rag_retrieval.json")
     dataset = _load_json(ROOT_DIR / spec["dataset"])
@@ -67,7 +63,7 @@ def run_rag_retrieval_suite() -> tuple[dict[str, float], list[Any], dict[str, An
 
 def run_photo_memory_suite() -> tuple[dict[str, float], list[Any], dict[str, Any]]:
     """纯函数评测，不需要索引也不需要外部服务，任何环境都能跑。"""
-    import photo_memory
+    from evals.judges import photo_memory
 
     spec = _load_json(ROOT_DIR / "evals" / "specs" / "photo_memory.json")
     dataset = _load_json(ROOT_DIR / spec["dataset"])
@@ -95,7 +91,7 @@ def _metric_threshold(spec: dict[str, Any], metric_name: str) -> float:
 
 def run_conversation_persistence_suite() -> tuple[dict[str, float], list[Any], dict[str, Any]]:
     """纯本地评测：临时目录 + 桩压缩，不调模型也不碰真实 data/。"""
-    import conversation_persistence
+    from evals.judges import conversation_persistence
 
     spec = _load_json(ROOT_DIR / "evals" / "specs" / "conversation_persistence.json")
     dataset = _load_json(ROOT_DIR / spec["dataset"])
@@ -107,7 +103,7 @@ def run_conversation_persistence_suite() -> tuple[dict[str, float], list[Any], d
 
 def run_prompt_injection_suite() -> tuple[dict[str, float], list[Any], dict[str, Any]]:
     """纯本地评测：假模型驱动真实循环，不调外部服务。"""
-    import prompt_injection
+    from evals.judges import prompt_injection
 
     spec = _load_json(ROOT_DIR / "evals" / "specs" / "prompt_injection.json")
     dataset = _load_json(ROOT_DIR / spec["dataset"])
@@ -181,7 +177,7 @@ def main() -> None:
         print("Suite: rag_retrieval")
         print(f"SKIPPED: {skip_reason}")
     else:
-        import rag_retrieval
+        from evals.judges import rag_retrieval
 
         print(f"Retrieval mode: {rag_retrieval.retrieval_mode()}")
         passed = (

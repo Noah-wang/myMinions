@@ -1,7 +1,7 @@
 import os
 import re
 
-from running_tools import build_running_registry
+from agents.coros_report.running_tools import build_running_registry
 from src.runtime.conversation import (
     MAX_PENDING_QUESTIONS,
     RUNNING_COACH_TOPIC,

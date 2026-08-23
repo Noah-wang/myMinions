@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from auto_report import activity_key, latest_coros_activity
+from agents.coros_report.auto_report import activity_key, latest_coros_activity
 from src.runtime.memory import get_agent_memory, update_agent_memory
 
 

@@ -15,7 +15,7 @@ import fitdecode
 from src.integrations.coros_mcp import call_coros_tool
 
 
-ROOT_DIR = Path(__file__).resolve().parents[3]
+from src.runtime.paths import ROOT_DIR  # noqa: E402
 DEFAULT_FIT_DIR = ROOT_DIR / "data" / "coros-report" / "fit-files"
 DEFAULT_ROUTE_MAP_DIR = ROOT_DIR / "data" / "coros-report" / "route-maps"
 SEMICIRCLE_TO_DEGREES = 180 / 2**31

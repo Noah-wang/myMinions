@@ -10,7 +10,7 @@ from src.runtime.atomic import write_json_batch
 from src.runtime.capability import RuntimeAttachment
 
 
-ROOT_DIR = Path(__file__).resolve().parents[3]
+from src.runtime.paths import ROOT_DIR  # noqa: E402
 DATA_DIR = ROOT_DIR / "data" / "photo-memory"
 MEDIA_DIR = ROOT_DIR / "data" / "media" / "photo-memory"
 PHOTOS_PATH = DATA_DIR / "photos.json"

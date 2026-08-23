@@ -40,6 +40,34 @@
 
 公开 Web 入口只读，写入操作仍限制在 Discord 能力频道。
 
+## FIT 全量归档
+
+`scripts/archive_all_fit.py` 把 COROS 上的历史活动 FIT 文件拉到 `data/coros-report/fit-files/`。任务幂等——本地已有的不会重复下载，中断了重跑即可续传。
+
+COROS 对 FIT 下载有**每日配额**（实测约 50 次），且配额用完时接口不报错、只返回空，和「这条活动本来就没有 FIT」无法区分。所以脚本带熔断：连续 5 条失败就停并说明原因，不会空烧几百次调用。`--max-downloads` 可以把单次运行压在配额以内。
+
+服务器上由 systemd 定时器每天跑一次：
+
+```
+agentdeck-fit-archive.timer  →  --max-downloads 45
+```
+
+留 5 次余量给 Discord bot 的自动报告。手动跑：
+
+```bash
+uv run python scripts/archive_all_fit.py --max-downloads 45
+```
+
+## 评测与留出集
+
+`evals/` 下有五套回归评测（路由、照片、会话持久化、注入防护、RAG 检索），`uv run python evals/run_evals.py` 全跑。
+
+另有一套**留出集** `evals/run_holdout.py`，26 道全新的检索题，**刻意不接进默认评测**。它的价值完全来自「从来没参与过任何决定」——现有的 30 道检索题已经被反复用于调参（切片参数、混合检索、reranking 都是看着它的结果定的），在它上面调出来的最优值不一定能泛化。
+
+实例：top-k 在调参集上看 k=4 是完美饱和点，在留出集上 k=3 和 k=4 **完全没有区别**。所以 k 维持 3。
+
+留出集只在重大改动（换切片策略、换嵌入模型、加 reranker）后跑一次做最终验收，**跑完不要照着失败用例调参数**，否则这把尺子就废了。
+
 ## 可观测性
 
 `src/runtime/trace.py` 给每次请求分配 `trace_id`（用 `ContextVar` 传递，跨 `await` 自动携带），日志是单行 `key=value` 的结构化事件，一次请求从入口、模型调用、工具执行到二次推理可以用同一个 trace 串起来，结束时汇总耗时、模型调用次数和 token 总量。

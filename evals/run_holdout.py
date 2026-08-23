@@ -29,8 +29,6 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
-sys.path.insert(0, str(ROOT_DIR / "evals" / "judges"))
-sys.path.insert(0, str(ROOT_DIR / "agents" / "coros-report" / "agent"))
 
 from dotenv import load_dotenv  # noqa: E402
 
@@ -40,7 +38,7 @@ from dotenv import load_dotenv  # noqa: E402
 # 差点被当成留出集上的真实表现。
 load_dotenv(ROOT_DIR / ".env")
 
-import rag_retrieval  # noqa: E402
+from evals.judges import rag_retrieval  # noqa: E402
 
 from src.runtime.rag import DEFAULT_TOP_K, search_knowledge  # noqa: E402
 

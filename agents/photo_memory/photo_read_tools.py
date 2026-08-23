@@ -10,7 +10,7 @@ COROS 记的是每天的训练，比赛是用户自己上传照片时标注的�
 
 from typing import Any
 
-from photo_store import list_recent_groups
+from agents.photo_memory.photo_store import list_recent_groups
 from src.runtime.tools import Tool
 
 

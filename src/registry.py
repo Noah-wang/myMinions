@@ -1,9 +1,9 @@
 from src.runtime.capability import Capability, CommandContext, TextCommand
 from src.runtime.tools import Tool
 
-from coros_capability import build_coros_capability
-from kitchen_capability import build_kitchen_capability
-from photo_capability import build_photo_capability
+from agents.coros_report.coros_capability import build_coros_capability
+from agents.kitchen_assistant.kitchen_capability import build_kitchen_capability
+from agents.photo_memory.photo_capability import build_photo_capability
 
 
 class CapabilityRegistry:

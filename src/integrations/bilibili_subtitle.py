@@ -5,8 +5,8 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATHS = (
-    ROOT_DIR / "agents" / "kitchen-assistant" / "config.toml",
-    ROOT_DIR / "agents" / "coros-report" / "config.toml",
+    ROOT_DIR / "agents" / "kitchen_assistant" / "config.toml",
+    ROOT_DIR / "agents" / "coros_report" / "config.toml",
     Path.home() / ".config" / "bilibili-subtitle-fetch" / "config.toml",
 )
 

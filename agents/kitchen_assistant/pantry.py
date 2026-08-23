@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
+from src.runtime.paths import ROOT_DIR  # noqa: E402
 DATA_DIR = ROOT_DIR / "data" / "kitchen-assistant"
 RECIPES_PATH = DATA_DIR / "recipes.json"
 SHOPPING_LIST_PATH = DATA_DIR / "shopping_list.json"

@@ -2,7 +2,7 @@ import math
 from datetime import date, datetime
 from typing import Any
 
-from running_profile import apply_profile_patch, read_athlete_profile
+from agents.coros_report.running_profile import apply_profile_patch, read_athlete_profile
 from src.runtime.knowledge_health import inspect_knowledge_index
 from src.runtime.tools import Tool, ToolRegistry
 

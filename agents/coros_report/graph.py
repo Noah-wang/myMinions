@@ -2,7 +2,7 @@ from typing import Any, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from agent import fetch_coros_results, plan_coros_tools, render_coros_report
+from agents.coros_report.agent import fetch_coros_results, plan_coros_tools, render_coros_report
 from src.runtime.llm import complete_json, complete_text
 
 

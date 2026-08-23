@@ -1,4 +1,4 @@
-from pantry import (
+from agents.kitchen_assistant.pantry import (
     add_recipe_to_shopping_list,
     format_expiring,
     format_pantry,
@@ -10,9 +10,9 @@ from pantry import (
     save_recipe,
     use_pantry_item,
 )
-from recipe_extractor import extract_recipe_from_subtitle
+from agents.kitchen_assistant.recipe_extractor import extract_recipe_from_subtitle
 from src.runtime.capability import Capability, CommandContext, TextCommand
-from subtitle_fetcher import fetch_bilibili_subtitle
+from agents.kitchen_assistant.subtitle_fetcher import fetch_bilibili_subtitle
 
 
 async def _kitchen(context: CommandContext, argument: str) -> None:

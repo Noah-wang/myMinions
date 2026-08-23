@@ -12,9 +12,9 @@
 
 from typing import Any
 
-from activity_browser import query_activity_records, summarize_activity
-from personal_bests import format_personal_bests
-from running_profile import read_athlete_profile
+from agents.coros_report.activity_browser import query_activity_records, summarize_activity
+from agents.coros_report.personal_bests import format_personal_bests
+from agents.coros_report.running_profile import read_athlete_profile
 from src.runtime.rag import format_context, search_knowledge
 from src.runtime.tools import Tool
 

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from auto_report import _activity_records, _timestamp, activity_key, generate_activity_report
+from agents.coros_report.auto_report import _activity_records, _timestamp, activity_key, generate_activity_report
 from src.integrations.coros_mcp import call_coros_tool
 from src.runtime.conversation import RUNNING_COACH_TOPIC, get_context_value
 from src.runtime.memory import (
