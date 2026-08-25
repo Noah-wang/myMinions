@@ -9,6 +9,11 @@ const form = document.querySelector("#chatForm");
 const input = document.querySelector("#messageInput");
 const sendButton = document.querySelector("#sendButton");
 const newChatButton = document.querySelector("#newChat");
+const flowDrawer = document.querySelector("#flowDrawer");
+const flowToggle = document.querySelector("#flowToggle");
+const flowNodes = document.querySelectorAll("#flowMap .flow-node");
+const flowEdges = document.querySelectorAll("#flowMap .flow-edge");
+const flowHint = document.querySelector("#flowHint");
 
 const ACTIVE_SESSION_KEY = "agentdeck-active-session";
 const CONVERSATIONS_KEY = "agentdeck-conversations-v2";
@@ -28,6 +33,17 @@ let thinkingEl = null;
 let activeSessionId = "";
 let defaultActions = FALLBACK_ACTIONS;
 let contextualActions = null;
+let flowQueue = [];
+let flowPlaying = false;
+let lastFlowModule = null;
+
+function setFlowExpanded(expanded) {
+  if (!flowDrawer || !flowToggle) return;
+  flowDrawer.classList.toggle("is-collapsed", !expanded);
+  flowToggle.setAttribute("aria-expanded", String(expanded));
+  const text = flowToggle.querySelector(".flow-toggle-text");
+  if (text) text.textContent = expanded ? "收起调用链路" : "查看调用链路";
+}
 
 function newSessionId() {
   return crypto.randomUUID
@@ -210,6 +226,85 @@ function appendMessage(kind, text, options = {}) {
   return bubble;
 }
 
+function flowReset() {
+  for (const node of flowNodes) node.classList.remove("is-active", "is-done");
+  for (const edge of flowEdges) edge.classList.remove("is-active", "is-done");
+  flowQueue = [];
+  flowPlaying = false;
+  lastFlowModule = null;
+  if (flowHint) flowHint.textContent = "提问后这里会按顺序点亮";
+}
+
+// 只有「当前步」是高亮的，之前走过的降级成 is-done。
+// 这样一眼看得出走到哪了，同时保留了整条路径。
+function flowStepNow(module, hint) {
+  if (!flowNodes.length) return;
+  for (const node of flowNodes) {
+    const name = node.dataset.module;
+    if (name === module) {
+      node.classList.remove("is-done");
+      node.classList.add("is-active");
+    } else if (node.classList.contains("is-active")) {
+      node.classList.remove("is-active");
+      node.classList.add("is-done");
+    }
+  }
+
+  if (lastFlowModule && lastFlowModule !== module) {
+    const edge =
+      document.querySelector(
+        `#flowMap .flow-edge[data-from="${lastFlowModule}"][data-to="${module}"]`,
+      ) || document.querySelector(`#flowMap .flow-edge[data-to="${module}"]`);
+    if (edge) {
+      for (const item of flowEdges) {
+        if (item.classList.contains("is-active")) {
+          item.classList.remove("is-active");
+          item.classList.add("is-done");
+        }
+      }
+      edge.classList.remove("is-done");
+      edge.classList.add("is-active");
+    }
+  }
+
+  lastFlowModule = module;
+  if (flowHint && hint) flowHint.textContent = hint;
+}
+
+async function playFlowQueue() {
+  if (flowPlaying) return;
+  flowPlaying = true;
+  while (flowQueue.length) {
+    const step = flowQueue.shift();
+    flowStepNow(step.module, step.hint);
+    await new Promise((resolve) => setTimeout(resolve, 240));
+  }
+  flowPlaying = false;
+}
+
+function flowStep(module, hint) {
+  if (!module) return;
+  flowQueue.push({ module, hint });
+  playFlowQueue();
+}
+
+// 回答落地后不再有「当前步」，全部转成走过的状态。
+function flowSettle() {
+  if (!flowNodes.length) return;
+  for (const node of flowNodes) {
+    if (node.classList.contains("is-active")) {
+      node.classList.remove("is-active");
+      node.classList.add("is-done");
+    }
+  }
+  for (const edge of flowEdges) {
+    if (edge.classList.contains("is-active")) {
+      edge.classList.remove("is-active");
+      edge.classList.add("is-done");
+    }
+  }
+}
+
 function showThinking(label) {
   hideWelcome();
   if (!thinkingEl) {
@@ -321,6 +416,8 @@ async function streamChat(message) {
         await streamText(appendMessage("agent", "", { persist: false }), text);
         appendStoredMessage("agent", text);
         updateContextualSuggestions("", text);
+      } else if (event.type === "trace_step") {
+        flowStep(event.module, event.why || event.label || "");
       } else if (event.type === "status") {
         showThinking(event.message || "思考中");
       } else if (event.type === "error") {
@@ -354,6 +451,9 @@ async function submitMessage(message) {
   autoGrow();
   setBusy(true);
   showThinking("思考中");
+  setFlowExpanded(true);
+  flowReset();
+  flowStep("entry", "收到问题，交给主 Agent");
 
   try {
     await streamChat(message);
@@ -361,6 +461,7 @@ async function submitMessage(message) {
     appendMessage("error", `出错了：${error.message}`);
   } finally {
     hideThinking();
+    flowSettle();
     setBusy(false);
     input.focus();
   }
@@ -428,6 +529,26 @@ function contextualActionsFor(userText, agentText = "") {
       action("重点看后半程", "分析第 1 条运动记录，重点看后半程心率和配速"),
       action("生成训练建议", "根据最近这条运动记录，告诉我下一次应该怎么练"),
       action("查个人 PB", "查我的个人 PB"),
+    ];
+  }
+
+  // 跑鞋：知识库里现在有测评内容，问完一双自然会想比较、想结合自己水平
+  if (/跑鞋|碳板|缓震|中底|竞速鞋|训练鞋|穿什么鞋|选鞋|测评/.test(combined)) {
+    return [
+      action("结合我的水平推荐", "根据我的实际配速和周跑量，这双鞋适合我吗？还有更合适的吗"),
+      action("对比另一双", "把知识库里几双同价位的碳板鞋对比一下"),
+      action("比赛日怎么选", "我下一场比赛该穿哪双？考虑距离和我的完赛时间"),
+      action("看有哪些测评", "知识库里一共有哪些跑鞋测评？"),
+    ];
+  }
+
+  // 订阅：加完一个来源，接着会想确认状态和进度
+  if (/订阅|up主|知识来源|space\.bilibili|导入.*视频|知识库.*添加/.test(combined)) {
+    return [
+      action("查看当前订阅", "我订阅了哪些知识来源？"),
+      action("看知识库有什么", "我的跑步知识库里现在有哪些内容？"),
+      action("按分类查跑鞋", "从跑鞋测评里挑一双适合我日常训练的"),
+      action("按分类查训练", "从训练理论里讲讲阈值跑该怎么练"),
     ];
   }
 
@@ -511,6 +632,11 @@ input.addEventListener("keydown", (event) => {
 });
 
 newChatButton.addEventListener("click", startNewConversation);
+
+flowToggle?.addEventListener("click", () => {
+  const expanded = flowToggle.getAttribute("aria-expanded") === "true";
+  setFlowExpanded(!expanded);
+});
 
 function boot() {
   let conversations = loadConversations();

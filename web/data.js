@@ -61,6 +61,10 @@ function renderActiveSection() {
   header.querySelector("p:last-child").textContent = section.description || "";
   dataBoard.appendChild(header);
 
+  if (Array.isArray(section.tree) && section.tree.length) {
+    dataBoard.appendChild(renderKnowledgeTree(section.tree));
+  }
+
   const items = Array.isArray(section.items) ? section.items : [];
   if (!items.length) {
     const empty = document.createElement("section");
@@ -79,6 +83,101 @@ function renderActiveSection() {
     grid.appendChild(renderRecord(item, section.key));
   }
   dataBoard.appendChild(grid);
+}
+
+// 知识库按 内容方向 → UP主 → 单条资料 逐级展开。
+// 平铺成卡片时二十多条视频堆在一起看不出结构，而分类和 UP 主本来就在数据里。
+let treeSelection = { category: 0, group: 0 };
+
+function renderKnowledgeTree(tree) {
+  const wrap = document.createElement("section");
+  wrap.className = "knowledge-tree";
+
+  const aside = document.createElement("aside");
+  aside.className = "tree-rail";
+  const detail = document.createElement("div");
+  detail.className = "tree-detail";
+
+  function paint() {
+    aside.replaceChildren();
+    detail.replaceChildren();
+
+    const category = tree[treeSelection.category] || tree[0];
+    if (!category) return;
+
+    for (const [ci, cat] of tree.entries()) {
+      const catBtn = document.createElement("button");
+      catBtn.type = "button";
+      catBtn.className = `tree-category ${ci === treeSelection.category ? "active" : ""}`;
+      catBtn.innerHTML = `<span class="tree-label"></span><span class="tree-count"></span>`;
+      catBtn.querySelector(".tree-label").textContent = cat.label;
+      catBtn.querySelector(".tree-count").textContent = String(cat.count);
+      catBtn.addEventListener("click", () => {
+        treeSelection = { category: ci, group: 0 };
+        paint();
+      });
+      aside.appendChild(catBtn);
+
+      if (ci !== treeSelection.category) continue;
+      for (const [gi, group] of (cat.groups || []).entries()) {
+        const groupBtn = document.createElement("button");
+        groupBtn.type = "button";
+        groupBtn.className = [
+          "tree-group",
+          gi === treeSelection.group ? "active" : "",
+          group.count ? "" : "empty",
+        ].filter(Boolean).join(" ");
+        groupBtn.innerHTML = `<span class="tree-label"></span><span class="tree-count"></span>`;
+        groupBtn.querySelector(".tree-label").textContent = group.name;
+        // 显示回填进度（已导入/总数），让「订阅了但还没导入」的来源也有反馈
+        groupBtn.querySelector(".tree-count").textContent = group.progress || String(group.count);
+        groupBtn.addEventListener("click", () => {
+          treeSelection = { category: ci, group: gi };
+          paint();
+        });
+        aside.appendChild(groupBtn);
+      }
+    }
+
+    const group = (category.groups || [])[treeSelection.group] || (category.groups || [])[0];
+    if (!group) return;
+
+    const head = document.createElement("p");
+    head.className = "tree-detail-head";
+    const uidText = group.uid ? ` · UID ${group.uid}` : "";
+    head.textContent = `${category.label} · ${group.name}${uidText} · 已导入 ${group.count} 条`;
+    detail.appendChild(head);
+
+    if (!(group.items || []).length) {
+      const empty = document.createElement("p");
+      empty.className = "tree-empty";
+      empty.textContent = group.pending
+        ? `这个来源还没开始导入，共 ${group.pending} 条待同步。每天定时任务会分批抓取，避免触发 B 站接口限流。`
+        : "这个来源还没有导入任何内容。";
+      detail.appendChild(empty);
+      return;
+    }
+
+    for (const item of group.items || []) {
+      const row = document.createElement("article");
+      row.className = "tree-item";
+      row.innerHTML = `<div class="tree-item-main"><h4></h4><p></p></div>`;
+      row.querySelector("h4").textContent = item.title || "";
+      row.querySelector("p").textContent = item.meta || "";
+      if (item.prompt) {
+        const ask = document.createElement("a");
+        ask.className = "tree-ask";
+        ask.href = askUrl(item.prompt);
+        ask.textContent = "问它";
+        row.appendChild(ask);
+      }
+      detail.appendChild(row);
+    }
+  }
+
+  paint();
+  wrap.append(aside, detail);
+  return wrap;
 }
 
 function renderRecord(item, sectionKey) {

@@ -9,7 +9,7 @@ MEMORY_PATH = ROOT_DIR / "data" / "memory.json"
 
 DEFAULT_MEMORY: dict[str, Any] = {
     "global": {
-        "name": "Noah",
+        "name": "Runner",
         "language": "zh",
         "preferences": [],
     },

@@ -178,8 +178,31 @@ def _bm25_idf(document_frequency: int, total_chunks: int) -> float:
     )
 
 
-def search_knowledge_keyword(query: str, limit: int = 5) -> list[dict[str, Any]]:
-    chunks = _load_chunks()
+def filter_by_category(
+    chunks: list[dict[str, Any]], category: str | None
+) -> list[dict[str, Any]]:
+    """按分类收窄候选。category 为空表示不过滤，全库查。
+
+    过滤放在打分**之前**：不同主题不该互相挤占名额。语料里书占 94%，
+    再灌入跑鞋测评这类新主题之后，训练类问题会被逐渐挤下去。
+
+    分类不认识时返回全部而不是空——**宁可查得宽，也不能因为模型写错一个词
+    就变成查不到**。查得宽最多是结果不够准，返回空则是功能直接失效。
+    """
+    if not category:
+        return chunks
+    matched = [c for c in chunks if c.get("category") == category]
+    return matched or chunks
+
+
+def known_categories() -> list[str]:
+    return sorted({str(c.get("category", "")) for c in _load_chunks() if c.get("category")})
+
+
+def search_knowledge_keyword(
+    query: str, limit: int = 5, category: str | None = None
+) -> list[dict[str, Any]]:
+    chunks = filter_by_category(_load_chunks(), category)
     query_tokens = set(_tokenize(query))
     if not chunks or not query_tokens:
         return []
@@ -335,7 +358,9 @@ def _reciprocal_rank_fusion(
     return [item_id for item_id, _ in ordered[:limit]]
 
 
-async def search_knowledge(query: str, limit: int = 5) -> list[dict[str, Any]]:
+async def search_knowledge(
+    query: str, limit: int = 5, category: str | None = None
+) -> list[dict[str, Any]]:
     """父子块 + 混合检索。
 
     子块小、向量不被稀释，负责精确匹配；父块大、上下文完整，负责投喂给模型。
@@ -346,27 +371,42 @@ async def search_knowledge(query: str, limit: int = 5) -> list[dict[str, Any]]:
     embeddings = _load_embeddings()
     items = embeddings.get("items", [])
     if not chunks or not items or not embedding_configured():
-        return search_knowledge_keyword(query, limit)
+        return search_knowledge_keyword(query, limit, category)
     if embeddings.get("model") != get_embedding_model():
-        return search_knowledge_keyword(query, limit)
+        return search_knowledge_keyword(query, limit, category)
 
     chunks_by_id = {chunk["id"]: chunk for chunk in chunks}
+    # 索引必须建在**全部**块上。先按分类裁掉 chunks 的话，
+    # 下面那条一致性检查会把它当成索引损坏，直接退回关键词检索。
     index = _vector_index(items, set(chunks_by_id))
     if len(index["parents"]) != len(chunks):
-        return search_knowledge_keyword(query, limit)
+        return search_knowledge_keyword(query, limit, category)
 
     query_vector = (await embed_texts([query]))[0]
+
+    def _take(parent_ids: list[str]) -> list[dict[str, Any]]:
+        """按排名取结果，需要时先按分类筛。
+
+        排序本来就是全量做的（argsort 之后才切片），所以要全排名不额外花钱。
+        必须排完再筛：先筛再排会让分类外的块根本进不了打分环节，
+        而「不确定属于哪类」时我们希望它仍然能被检索到。
+        """
+        picked = [chunks_by_id[pid] for pid in parent_ids if pid in chunks_by_id]
+        return filter_by_category(picked, category)[:limit]
+
     if not _hybrid_enabled():
-        return [chunks_by_id[pid] for pid in _rank_parents(index, query_vector, limit)]
+        pool = len(chunks) if category else limit
+        return _take(_rank_parents(index, query_vector, pool))
 
     vector_ids = _rank_parents(index, query_vector, FUSION_CANDIDATES)
     keyword_ids = [
         chunk["id"] for chunk in search_knowledge_keyword(query, FUSION_CANDIDATES)
     ]
     fused = _reciprocal_rank_fusion(
-        [(vector_ids, _hybrid_vector_weight()), (keyword_ids, 1.0)], limit
+        [(vector_ids, _hybrid_vector_weight()), (keyword_ids, 1.0)],
+        len(chunks) if category else limit,
     )
-    return [chunks_by_id[parent_id] for parent_id in fused if parent_id in chunks_by_id]
+    return _take(fused)
 
 
 def format_page_label(chunk: dict[str, Any]) -> str:

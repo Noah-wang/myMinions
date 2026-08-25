@@ -41,12 +41,38 @@ class Tool:
     returns_untrusted: bool = False
 
     def schema(self) -> dict[str, Any]:
+        """工具的 JSON schema，额外注入一个 why 字段。
+
+        这是把 ReAct 的 Thought 找回来的办法。原版 ReAct 让模型输出
+        `Thought: ...` 文本，天然可见；原生 function calling 下推理在模型内部，
+        唯一漏出来的是调工具那一轮的 content——**而第一轮用 tool_choice="required"
+        强制调工具时，DeepSeek 根本不输出 content**（实测 auto 有、required 为空）。
+
+        强制调用是防幻觉用的，不能为了看思考就去掉。所以换个位置：
+        让理由跟着工具参数一起来。参数是必须输出的，压不掉。
+        """
+        parameters = {
+            **self.parameters,
+            "properties": {
+                **self.parameters.get("properties", {}),
+                "why": {
+                    "type": "string",
+                    "description": "一句话说明你为什么现在要调这个工具",
+                },
+            },
+        }
+        # why 设成必填。设成可选时模型时填时不填——尤其第一轮
+        # tool_choice="required" 下它倾向于只给最小参数集，理由就丢了。
+        parameters["required"] = [
+            *self.parameters.get("required", []),
+            "why",
+        ]
         return {
             "type": "function",
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": self.parameters,
+                "parameters": parameters,
             },
         }
 
@@ -65,6 +91,9 @@ class ToolRegistry:
         tool = self._tools.get(name)
         if tool is None:
             return {"error": f"unknown tool: {name}"}
+
+        # why 是注入给模型解释自己的，业务处理器没有这个参数，传进去会 TypeError
+        arguments = {k: v for k, v in arguments.items() if k != "why"}
 
         try:
             result = tool.handler(**arguments)
@@ -102,6 +131,7 @@ async def run_tool_loop(
     max_rounds: int = DEFAULT_MAX_ROUNDS,
     log: Callable[[str], None] | None = None,
     force_first_tool: bool = False,
+    on_tool: Callable[[str, str], Any] | None = None,
 ) -> str:
     """跑一轮完整的工具调用循环，返回模型的最终文本回答。
 
@@ -126,6 +156,17 @@ async def run_tool_loop(
 
         if not tool_calls:
             return message.content or ""
+
+        # 模型在决定调工具那一轮往往会顺带说一句为什么。这段话本来就会被存进
+        # 消息历史（下一轮它自己看得见），但一直没进日志——
+        # 于是 trace 里只有「调了 list_races」，没有「为什么调它」。
+        #
+        # 这是原生 function calling 和原版 ReAct 的差别：原版把 Thought 写成
+        # 提示词里的一行文本，天然可见；原生模式下推理在模型内部，
+        # 只有这段 content 是唯一漏出来的部分。它已经在手边，记下来不花任何代价。
+        thought = (message.content or "").strip()
+        if thought:
+            log_event("tool_thought", round=round_index, text=thought[:300])
 
         messages.append(
             {
@@ -153,7 +194,11 @@ async def run_tool_loop(
                 "tool_call",
                 round=round_index,
                 name=call.function.name,
-                arguments=json.dumps(arguments, ensure_ascii=False)[:200],
+                why=str(arguments.get("why", ""))[:160] or "-",
+                arguments=json.dumps(
+                    {k: v for k, v in arguments.items() if k != "why"},
+                    ensure_ascii=False,
+                )[:200],
             )
             if log is not None:
                 log(
@@ -161,6 +206,14 @@ async def run_tool_loop(
                     f"arguments={arguments}"
                 )
             started = time.monotonic()
+
+            if on_tool is not None:
+                # 把「要调什么、为什么」推给愿意显示进度的入口。
+                # 失败不能影响主流程——它只是个提示。
+                try:
+                    await on_tool(call.function.name, str(arguments.get("why", "")))
+                except Exception:
+                    pass
 
             tool = registry.get(call.function.name)
             if tainted and tool is not None and tool.writes:

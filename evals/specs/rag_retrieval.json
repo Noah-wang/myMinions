@@ -33,6 +33,10 @@
     "pinpoint_hit_rate_at_k": {
       "description": "hit@k restricted to pinpoint factual questions.",
       "threshold": 0.87
+    },
+    "category_filter_correctness": {
+      "description": "Fraction of category-filter cases producing the exact expected chunk set. The dangerous failure is over-filtering to empty: retrieval would silently stop working and look like 'nothing in the knowledge base', so an unknown or unmatched category must fall back to the full set rather than return nothing.",
+      "threshold": 1.0
     }
   },
   "constraints": [
@@ -41,7 +45,8 @@
     "Report whether retrieval ran in vector mode or fell back to keyword mode, because rag.py degrades silently.",
     "Ground truth is keyword presence, not page numbers. Page numbers shift whenever chunking changes, and chunking is what this suite measures.",
     "Thresholds are set just below the measured baseline so the suite acts as a regression guard, not an aspiration.",
-    "Judge must use src.runtime.rag.DEFAULT_TOP_K, not a hardcoded k. The judge previously hardcoded 5 while production used 3, which overstated coverage."
+    "Judge must use src.runtime.rag.DEFAULT_TOP_K, not a hardcoded k. The judge previously hardcoded 5 while production used 3, which overstated coverage.",
+    "Category-filter cases use hand-built chunks, so they need no index and no embedding call."
   ],
   "baseline": {
     "measured_at": "2026-08-19",
@@ -90,5 +95,6 @@
       "config": "混合检索 RRF 融合（向量 + 关键词 TF-IDF）",
       "verdict": "更差，已默认关闭。等权时 hit@k 1.00→0.93、book_hit 1.00→0.91；向量权重加到 8:1 才回到纯向量水平，说明关键词的每一分贡献都是负的。结构性原因：纯向量已经饱和，融合只能把正确结果挤出去。代码和 RAG_HYBRID_ENABLED 开关保留，语料变大后可重新评估。"
     }
-  ]
+  ],
+  "category_dataset": "evals/datasets/rag_retrieval_category.json"
 }

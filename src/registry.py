@@ -1,9 +1,8 @@
-from src.runtime.capability import Capability, CommandContext, TextCommand
-from src.runtime.tools import Tool
+import importlib
 
-from agents.coros_report.coros_capability import build_coros_capability
-from agents.kitchen_assistant.kitchen_capability import build_kitchen_capability
-from agents.photo_memory.photo_capability import build_photo_capability
+from src.runtime.capability import Capability, CommandContext, TextCommand
+from src.runtime.paths import ROOT_DIR
+from src.runtime.tools import Tool
 
 
 class CapabilityRegistry:
@@ -122,16 +121,36 @@ class CapabilityRegistry:
 
 _registry: CapabilityRegistry | None = None
 
+AGENTS_DIR = ROOT_DIR / "agents"
+
+
+def discover_capabilities() -> list[Capability]:
+    """扫描 `agents/*/xxx_capability.py`，把每个 `build_*_capability()` 的结果收进来。
+
+    原来这里是三行写死的 import。写死的代价是**「装了哪些能力」变成了代码事实**：
+    想只跑跑步那一套，得改 registry；抽一个开源版出来，得改 registry；
+    删掉一个能力目录会直接 ImportError。
+
+    改成扫描之后，**目录在 = 能力在**，加减能力都不用碰这个文件。
+    顺序按目录名排，保证 `describe()` 和评测里的工具表是稳定的。
+    """
+    capabilities: list[Capability] = []
+    for module_path in sorted(AGENTS_DIR.glob("*/*_capability.py")):
+        module_name = f"agents.{module_path.parent.name}.{module_path.stem}"
+        module = importlib.import_module(module_name)
+        builders = sorted(
+            name
+            for name in dir(module)
+            if name.startswith("build_") and name.endswith("_capability")
+        )
+        for name in builders:
+            capabilities.append(getattr(module, name)())
+    return capabilities
+
 
 def get_registry() -> CapabilityRegistry:
-    """获取单例模式的功能注册表实例，默认加载 Coros 报告和厨房助手两大能力。"""
+    """获取单例的功能注册表，能力由 `agents/` 下的目录自动发现。"""
     global _registry
     if _registry is None:
-        _registry = CapabilityRegistry(
-            [
-                build_coros_capability(),
-                build_kitchen_capability(),
-                build_photo_capability(),
-            ]
-        )
+        _registry = CapabilityRegistry(discover_capabilities())
     return _registry

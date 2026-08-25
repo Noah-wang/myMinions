@@ -29,6 +29,116 @@
       </aside>
 
       <section class="chat-shell">
+        <section class="flow-drawer is-collapsed" id="flowDrawer" aria-label="本次调用链路">
+          <button
+            type="button"
+            class="flow-toggle"
+            id="flowToggle"
+            aria-controls="flowMap"
+            aria-expanded="false"
+          >
+            <span class="flow-toggle-text">查看调用链路</span>
+            <span class="flow-toggle-dot" aria-hidden="true"></span>
+          </button>
+
+          <div class="flowmap" id="flowMap">
+            <div class="flowmap-head">
+              <div>
+                <h2>调用链路</h2>
+                <p id="flowHint">提问后这里会按顺序点亮</p>
+              </div>
+              <span>Live Trace</span>
+            </div>
+            <div class="flowmap-canvas">
+              <div class="flow-stack" role="list">
+                <div class="flow-node" data-module="entry" role="listitem">
+                  <span class="flow-index">01</span>
+                  <strong>入口</strong>
+                  <small>接收问题</small>
+                </div>
+                <div class="flow-node" data-module="router" role="listitem">
+                  <span class="flow-index">02</span>
+                  <strong>语义路由</strong>
+                  <small>判断交给哪个能力</small>
+                </div>
+                <div class="flow-node" data-module="capability" role="listitem">
+                  <span class="flow-index">03</span>
+                  <strong>能力层</strong>
+                  <small>选择 COROS / 厨房 / 照片等能力</small>
+                </div>
+                <div class="flow-node" data-module="loop" role="listitem">
+                  <span class="flow-index">04</span>
+                  <strong>主循环</strong>
+                  <small>模型决定是否继续调用工具</small>
+                </div>
+                <div class="flow-node" data-module="langgraph" role="listitem">
+                  <span class="flow-index">05</span>
+                  <strong>LangGraph</strong>
+                  <small>报告工作流编排</small>
+                </div>
+                <div class="flow-node" data-module="coros" role="listitem">
+                  <span class="flow-index">06</span>
+                  <strong>COROS MCP</strong>
+                  <small>读取运动数据</small>
+                </div>
+                <div class="flow-node" data-module="profile" role="listitem">
+                  <span class="flow-index">07</span>
+                  <strong>长期档案</strong>
+                  <small>读取 PB、目标、主观感受</small>
+                </div>
+                <div class="flow-node" data-module="knowledge" role="listitem">
+                  <span class="flow-index">08</span>
+                  <strong>RAG 知识库</strong>
+                  <small>检索书籍和视频知识</small>
+                </div>
+                <div class="flow-node" data-module="races" role="listitem">
+                  <span class="flow-index">09</span>
+                  <strong>比赛照片</strong>
+                  <small>读取照片与比赛元数据</small>
+                </div>
+                <div class="flow-node" data-module="search" role="listitem">
+                  <span class="flow-index">10</span>
+                  <strong>联网搜索</strong>
+                  <small>补充外部信息</small>
+                </div>
+                <div class="flow-node" data-module="kitchen" role="listitem">
+                  <span class="flow-index">11</span>
+                  <strong>后厨数据</strong>
+                  <small>读取菜谱、采购、库存</small>
+                </div>
+                <div class="flow-node" data-module="llm" role="listitem">
+                  <span class="flow-index">12</span>
+                  <strong>LLM 生成</strong>
+                  <small>整合上下文并组织回答</small>
+                </div>
+                <div class="flow-node" data-module="answer" role="listitem">
+                  <span class="flow-index">13</span>
+                  <strong>回答</strong>
+                  <small>输出到当前对话</small>
+                </div>
+              </div>
+
+              <div class="flow-edge" data-from="entry" data-to="router" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="router" data-to="loop" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="router" data-to="capability" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="capability" data-to="langgraph" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="langgraph" data-to="coros" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="coros" data-to="llm" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="loop" data-to="profile" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="loop" data-to="knowledge" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="loop" data-to="races" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="loop" data-to="search" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="capability" data-to="kitchen" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="profile" data-to="llm" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="knowledge" data-to="llm" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="races" data-to="llm" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="search" data-to="llm" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="kitchen" data-to="llm" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="llm" data-to="answer" aria-hidden="true"></div>
+            </div>
+          </div>
+        </section>
+
         <div class="stage">
           <div class="thread" id="chatLog" aria-live="polite">
             <section class="welcome" id="welcome">

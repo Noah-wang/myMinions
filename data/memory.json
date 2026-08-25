@@ -9,13 +9,13 @@
       "goals": [],
       "preferences": [],
       "injury_notes": [],
-      "latest_reported_activity_id": "479671526264701228:101:1786910728:1786915661",
+      "latest_reported_activity_id": "479808391835844609:101:1787423693:1787425494",
       "feeling_notes": [],
       "latest_reported_activity": {
-        "labelId": "479671526264701228",
+        "labelId": "479808391835844609",
         "sportType": 101,
-        "startTimestamp": 1786910728,
-        "endTimestamp": 1786915661
+        "startTimestamp": 1787423693,
+        "endTimestamp": 1787425494
       },
       "athlete_profile": {
         "current_times": {
@@ -27,12 +27,335 @@
             "distance": "marathon",
             "target_time": null,
             "target_date": null
+          },
+          {
+            "distance": "marathon",
+            "target_time": "3:40:00",
+            "target_date": null
+          },
+          {
+            "distance": "marathon",
+            "target_time": "3:40:00"
           }
         ],
-        "race_notes": [],
+        "race_notes": [
+          {
+            "distance": "half_marathon",
+            "time": null,
+            "issue": "未说明"
+          },
+          {
+            "distance": "marathon",
+            "time": null,
+            "issue": "天气热，后程跑不动"
+          },
+          {
+            "distance": "marathon",
+            "time": "4:30:00",
+            "issue": "洛马，天气热，后程跑不动"
+          }
+        ],
         "injury_notes": [],
-        "preferences": []
+        "preferences": [
+          "训练内容主要是间歇跑",
+          "每三天一个休息日"
+        ],
+        "training_context": {
+          "training_days_per_week": 5.5,
+          "weekly_mileage_km": 40,
+          "recent_long_run_km": 21
+        }
+      },
+      "personal_bests": {
+        "marathon": {
+          "distance": "全马",
+          "distance_km": 42.195,
+          "seconds": 16248,
+          "time": "4:30:48",
+          "activity_id": "475938633814147174:100:1772979232:1772995548",
+          "labelId": "475938633814147174",
+          "sportType": 100,
+          "date": "2026-03-08",
+          "source": "coros_mcp",
+          "updated_at": "2026-08-21T18:40:15+00:00"
+        },
+        "5k": {
+          "distance": "5 公里",
+          "distance_km": 5.0,
+          "seconds": 1444,
+          "time": "24:04",
+          "activity_id": "479808391835844609:101:1787423693:1787425494",
+          "labelId": "479808391835844609",
+          "sportType": 101,
+          "date": "2026-08-22",
+          "source": "coros_mcp",
+          "updated_at": "2026-08-22T19:12:52+00:00"
+        }
       }
+    }
+  },
+  "caches": {
+    "coros-report": {
+      "last_activity_list": [
+        {
+          "labelId": "479808391835844609",
+          "sportType": 101,
+          "startTimestamp": 1787423693,
+          "endTimestamp": 1787425494,
+          "sportName": "Indoor Run",
+          "date": "2026-08-22",
+          "duration": "24:04",
+          "location": "跑步机",
+          "averagePace": "4:47 /km",
+          "averageHeartRate": 155,
+          "distanceKm": 5.02,
+          "activityKey": "479808391835844609:101:1787423693:1787425494",
+          "sortTimestamp": 1787425494
+        },
+        {
+          "labelId": "479763875850387456",
+          "sportType": 101,
+          "startTimestamp": 1787259616,
+          "endTimestamp": 1787259694,
+          "sportName": "Indoor Run",
+          "date": "2026-08-20",
+          "duration": "1:19",
+          "location": "跑步机",
+          "averagePace": "5:34 /km",
+          "averageHeartRate": 116,
+          "distanceKm": 0.235,
+          "activityKey": "479763875850387456:101:1787259616:1787259694",
+          "sortTimestamp": 1787259694
+        },
+        {
+          "labelId": "479740936430059724",
+          "sportType": 101,
+          "startTimestamp": 1787170859,
+          "endTimestamp": 1787174236,
+          "sportName": "Indoor Run",
+          "date": "2026-08-19",
+          "duration": "50:02",
+          "location": "跑步机",
+          "averagePace": "5:00 /km",
+          "averageHeartRate": 161,
+          "distanceKm": 10.0,
+          "activityKey": "479740936430059724:101:1787170859:1787174236",
+          "sortTimestamp": 1787174236
+        },
+        {
+          "labelId": "479718867009044484",
+          "sportType": 101,
+          "startTimestamp": 1787082499,
+          "endTimestamp": 1787085867,
+          "sportName": "Indoor Run",
+          "date": "2026-08-18",
+          "duration": "47:56",
+          "location": "跑步机",
+          "averagePace": "4:47 /km",
+          "averageHeartRate": 160,
+          "distanceKm": 10.0,
+          "activityKey": "479718867009044484:101:1787082499:1787085867",
+          "sortTimestamp": 1787085867
+        },
+        {
+          "labelId": "479671526264701228",
+          "sportType": 101,
+          "startTimestamp": 1786910728,
+          "endTimestamp": 1786915661,
+          "sportName": "Indoor Run",
+          "date": "2026-08-16",
+          "duration": "1:14:01",
+          "location": "跑步机",
+          "averagePace": "4:56 /km",
+          "averageHeartRate": 161,
+          "distanceKm": 15.02,
+          "activityKey": "479671526264701228:101:1786910728:1786915661",
+          "sortTimestamp": 1786915661
+        },
+        {
+          "labelId": "479645137987731857",
+          "sportType": 1002,
+          "startTimestamp": 1786817162,
+          "endTimestamp": 1786821455,
+          "sportName": "Basketball",
+          "date": "2026-08-15",
+          "duration": "1:11:34",
+          "location": "篮球",
+          "averageHeartRate": 147,
+          "activityKey": "479645137987731857:1002:1786817162:1786821455",
+          "sortTimestamp": 1786821455
+        },
+        {
+          "labelId": "479624756220428391",
+          "sportType": 101,
+          "startTimestamp": 1786737854,
+          "endTimestamp": 1786741430,
+          "sportName": "Indoor Run",
+          "date": "2026-08-14",
+          "duration": "47:14",
+          "location": "跑步机",
+          "averagePace": "4:43 /km",
+          "averageHeartRate": 162,
+          "distanceKm": 10.01,
+          "activityKey": "479624756220428391:101:1786737854:1786741430",
+          "sortTimestamp": 1786741430
+        },
+        {
+          "labelId": "479578469357879298",
+          "sportType": 101,
+          "startTimestamp": 1786565639,
+          "endTimestamp": 1786568391,
+          "sportName": "Indoor Run",
+          "date": "2026-08-12",
+          "duration": "39:22",
+          "location": "跑步机",
+          "averagePace": "4:55 /km",
+          "averageHeartRate": 165,
+          "distanceKm": 8.01,
+          "activityKey": "479578469357879298:101:1786565639:1786568391",
+          "sortTimestamp": 1786568391
+        },
+        {
+          "labelId": "479554811602174055",
+          "sportType": 101,
+          "startTimestamp": 1786478261,
+          "endTimestamp": 1786481960,
+          "sportName": "Indoor Run",
+          "date": "2026-08-11",
+          "duration": "50:51",
+          "location": "跑步机",
+          "averagePace": "5:05 /km",
+          "averageHeartRate": 161,
+          "distanceKm": 10.01,
+          "activityKey": "479554811602174055:101:1786478261:1786481960",
+          "sortTimestamp": 1786481960
+        },
+        {
+          "labelId": "479551760835313868",
+          "sportType": 101,
+          "startTimestamp": 1786393118,
+          "endTimestamp": 1786394231,
+          "sportName": "Indoor Run",
+          "date": "2026-08-10",
+          "duration": "18:27",
+          "location": "跑步机",
+          "averagePace": "5:16 /km",
+          "averageHeartRate": 153,
+          "distanceKm": 3.5,
+          "activityKey": "479551760835313868:101:1786393118:1786394231",
+          "sortTimestamp": 1786394231
+        },
+        {
+          "labelId": "479461651878281618",
+          "sportType": 101,
+          "startTimestamp": 1786132848,
+          "endTimestamp": 1786136404,
+          "sportName": "Indoor Run",
+          "date": "2026-08-07",
+          "duration": "49:02",
+          "location": "跑步机",
+          "averagePace": "4:54 /km",
+          "averageHeartRate": 160,
+          "distanceKm": 10.0,
+          "activityKey": "479461651878281618:101:1786132848:1786136404",
+          "sortTimestamp": 1786136404
+        },
+        {
+          "labelId": "479439099816608146",
+          "sportType": 101,
+          "startTimestamp": 1786046827,
+          "endTimestamp": 1786048710,
+          "sportName": "Indoor Run",
+          "date": "2026-08-06",
+          "duration": "25:38",
+          "location": "跑步机",
+          "averagePace": "5:07 /km",
+          "averageHeartRate": 158,
+          "distanceKm": 5.01,
+          "activityKey": "479439099816608146:101:1786046827:1786048710",
+          "sortTimestamp": 1786048710
+        },
+        {
+          "labelId": "479392925160079362",
+          "sportType": 101,
+          "startTimestamp": 1785875476,
+          "endTimestamp": 1785878509,
+          "sportName": "Indoor Run",
+          "date": "2026-08-04",
+          "duration": "41:48",
+          "location": "跑步机",
+          "averagePace": "4:55 /km",
+          "averageHeartRate": 163,
+          "distanceKm": 8.5,
+          "activityKey": "479392925160079362:101:1785875476:1785878509",
+          "sortTimestamp": 1785878509
+        },
+        {
+          "labelId": "479369568322617448",
+          "sportType": 101,
+          "startTimestamp": 1785787119,
+          "endTimestamp": 1785790786,
+          "sportName": "Indoor Run",
+          "date": "2026-08-03",
+          "duration": "50:37",
+          "location": "跑步机",
+          "averagePace": "5:03 /km",
+          "averageHeartRate": 162,
+          "distanceKm": 10.01,
+          "activityKey": "479369568322617448:101:1785787119:1785790786",
+          "sortTimestamp": 1785790786
+        },
+        {
+          "labelId": "479271151831384072",
+          "sportType": 101,
+          "startTimestamp": 1785356560,
+          "endTimestamp": 1785358651,
+          "sportName": "Indoor Run",
+          "date": "2026-07-29",
+          "duration": "32:00",
+          "location": "跑步机",
+          "averagePace": "5:14 /km",
+          "averageHeartRate": 163,
+          "distanceKm": 6.12,
+          "activityKey": "479271151831384072:101:1785356560:1785358651",
+          "sortTimestamp": 1785358651
+        },
+        {
+          "labelId": "479271151831384071",
+          "sportType": 101,
+          "startTimestamp": 1785269307,
+          "endTimestamp": 1785273014,
+          "sportName": "Indoor Run",
+          "date": "2026-07-28",
+          "duration": "52:13",
+          "location": "跑步机",
+          "averagePace": "5:12 /km",
+          "averageHeartRate": 163,
+          "distanceKm": 10.04,
+          "activityKey": "479271151831384071:101:1785269307:1785273014",
+          "sortTimestamp": 1785273014
+        }
+      ],
+      "last_activity_list_query": {
+        "startDate": "20260725",
+        "endDate": "20260824",
+        "sportTypeCodes": [
+          65535
+        ],
+        "minDistanceKm": 0,
+        "maxDistanceKm": 1000,
+        "minDurationMinutes": 0,
+        "maxDurationMinutes": 1440,
+        "maxAveragePace": "",
+        "locationKeyword": "",
+        "limit": 20
+      },
+      "last_activity_list_label": "最近 30 天",
+      "last_activity_list_updated_at": "2026-08-23T20:58:17+00:00"
+    },
+    "web-search": {
+      "date": "2026-08-23",
+      "count": 1
     }
   }
 }

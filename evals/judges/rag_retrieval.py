@@ -116,6 +116,31 @@ async def judge_case(case: dict[str, Any]) -> RetrievalCaseResult:
     )
 
 
+def judge_category_filter(case: dict[str, Any]) -> RetrievalCaseResult:
+    """分类过滤：纯函数，用构造好的块测，不碰真实索引也不调嵌入。
+
+    最危险的失败模式是**过滤过头返回空**——那会让检索静默失效，
+    而且看起来像「知识库里没有」。所以未知分类必须退回全部而不是空：
+    查得宽最多是结果不够准，返回空是功能直接不可用。
+    """
+    from src.runtime.rag import filter_by_category
+
+    chunks = [
+        {"id": f"c{i}", "category": category}
+        for i, category in enumerate(case["categories"])
+    ]
+    result = filter_by_category(chunks, case["filter"])
+    actual = {"kept": [c["category"] for c in result]}
+    expected = {"kept": case["expect_kept"]}
+    return RetrievalCaseResult(
+        case_id=case["id"],
+        passed=actual == expected,
+        rank=1 if actual == expected else None,
+        expected=expected,
+        actual=actual,
+    )
+
+
 def score_results(
     results: list[RetrievalCaseResult],
     dataset: list[dict[str, Any]],

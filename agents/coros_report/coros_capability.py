@@ -14,6 +14,7 @@ from agents.coros_report.knowledge import answer_running_question
 from agents.coros_report.coros_read_tools import COROS_READ_TOOLS
 from agents.coros_report.personal_bests import format_personal_bests
 from src.runtime.capability import Capability, CommandContext, TextCommand
+from src.runtime.knowledge_sources import add_source, format_sources
 from agents.coros_report.video_knowledge import import_running_video_knowledge
 
 
@@ -22,7 +23,7 @@ DEFAULT_REPORT_REQUEST = "分析我最近一次运动，重点看配速、心率
 
 async def _coros_report(context: CommandContext, argument: str) -> None:
     request = argument.strip() or DEFAULT_REPORT_REQUEST
-    await context.send("正在读取 COROS 数据并生成报告...")
+    await context.progress("正在读取 COROS 数据并生成报告...")
     try:
         report = await generate_coros_graph_report(request)
         await context.send_chunks(report)
@@ -34,7 +35,7 @@ async def _coros_report(context: CommandContext, argument: str) -> None:
 
 
 async def _coros_tools(context: CommandContext, _: str) -> None:
-    await context.send("正在读取 COROS MCP 工具列表...")
+    await context.progress("正在读取 COROS MCP 工具列表...")
     try:
         tools = await list_available_coros_tools()
         await context.send_chunks(tools)
@@ -43,7 +44,7 @@ async def _coros_tools(context: CommandContext, _: str) -> None:
 
 
 async def _coros_list(context: CommandContext, argument: str) -> None:
-    await context.send("正在读取 COROS 运动记录列表...")
+    await context.progress("正在读取 COROS 运动记录列表...")
     try:
         records = await list_activity_records(argument)
         await context.send_chunks(records)
@@ -52,7 +53,7 @@ async def _coros_list(context: CommandContext, argument: str) -> None:
 
 
 async def _coros_activity(context: CommandContext, argument: str) -> None:
-    await context.send("正在读取所选 COROS 运动详情并生成报告...")
+    await context.progress("正在读取所选 COROS 运动详情并生成报告...")
     try:
         result = await generate_selected_activity_report_for_conversation(
             argument,
@@ -75,7 +76,7 @@ async def _coros_fit_sync(context: CommandContext, argument: str) -> None:
         return
 
     query = argument.strip() or "最近 30 天"
-    await context.send(f"正在同步 COROS FIT 文件：{query}")
+    await context.progress(f"正在同步 COROS FIT 文件：{query}")
     try:
         records, _, label = await query_activity_records(query)
         if not records:
@@ -115,7 +116,7 @@ async def _running_ask(context: CommandContext, argument: str) -> None:
         await context.send("请写你的跑步训练问题。")
         return
 
-    await context.send("正在检索跑步书籍并生成回答...")
+    await context.progress("正在检索跑步书籍并生成回答...")
     try:
         answer = await answer_running_question(
             question, context.conversation_id, read_only=context.read_only
@@ -135,12 +136,33 @@ async def _running_video(context: CommandContext, argument: str) -> None:
         await context.send("请提供 B站 BV号或视频链接。")
         return
 
-    await context.send("正在抓取 B站字幕，并导入跑步知识库...")
+    await context.progress("正在抓取 B站字幕，并导入跑步知识库...")
     try:
         result = await import_running_video_knowledge(video_input)
         await context.send_chunks(result)
     except Exception as exc:
         await context.send(f"导入跑步视频失败：{exc}")
+
+
+async def _knowledge_source(context: CommandContext, argument: str) -> None:
+    """订阅一个 UP 主，之后定时任务会把他的视频字幕导入知识库。"""
+    if context.read_only:
+        await context.send("这个入口是只读的，添加知识来源请在 Discord 里操作。")
+        return
+
+    text = argument.strip()
+    if not text or text in {"list", "列表"}:
+        await context.send(format_sources())
+        return
+
+    # 分类可以写在链接后面：「<链接> shoes」。没写就按跑鞋处理——
+    # 目前订阅的绝大多数是跑鞋测评，让默认值贴近实际用法。
+    parts = text.split()
+    category = "shoes"
+    for part in parts:
+        if part in {"shoes", "training", "跑鞋", "训练"}:
+            category = {"跑鞋": "shoes", "训练": "training"}.get(part, part)
+    await context.send(add_source(text, category))
 
 
 async def _record_feeling(context: CommandContext, argument: str) -> None:
@@ -157,7 +179,7 @@ async def _list_feelings(context: CommandContext, _: str) -> None:
 
 
 async def _auto_check(context: CommandContext, _: str) -> None:
-    await context.send("正在检查是否有新的 COROS 运动...")
+    await context.progress("正在检查是否有新的 COROS 运动...")
     result = await check_and_send_coros_auto_report(
         context.client,
         notify_no_change=True,
@@ -172,7 +194,7 @@ async def _auto_check(context: CommandContext, _: str) -> None:
 
 
 async def _auto_report(context: CommandContext, _: str) -> None:
-    await context.send("正在对最新一条 COROS 运动生成自动报告...")
+    await context.progress("正在对最新一条 COROS 运动生成自动报告...")
     result = await check_and_send_coros_auto_report(
         context.client,
         send_on_first_run=True,
@@ -253,6 +275,17 @@ def build_coros_capability() -> Capability:
                 aliases=("running-import-video",),
                 writes=True,
                 argument_hint="B站链接或 BV 号，必须是用户真的给出来的",
+            ),
+            TextCommand(
+                "knowledge-source",
+                "订阅一个 B 站 UP 主，定时把他的视频字幕导入知识库",
+                _knowledge_source,
+                aliases=("subscribe", "订阅"),
+                writes=True,
+                argument_hint=(
+                    "UP 主空间链接或数字 ID，后面可以跟分类 shoes 或 training；"
+                    "留空或写 list 表示查看当前订阅"
+                ),
             ),
             TextCommand(
                 "feel",

@@ -51,6 +51,23 @@ class CommandContext:
     read_only: bool = False
     attachments: tuple[RuntimeAttachment, ...] = ()
 
+    # 进度提示的出口。和 send 分开，是因为主 Agent 循环把命令包装成工具之后，
+    # send 的内容会被收进缓冲区当作工具返回值交给模型——「正在读取 COROS 数据…」
+    # 这类话本来是说给人听的，被吞掉之后用户会对着几十秒的沉默干等。
+    #
+    # None 表示这个入口没有独立的进度通道，退回 send。
+    notify: SendText | None = None
+    # 是否把工具级的进度（模型为什么调这个工具）也推给用户。
+    # 网页有独立的 status 事件可以承载，显示完就消失；
+    # Discord 只能发真实消息，一次问答冒出三四条会很吵，所以默认关。
+    verbose_progress: bool = False
+
+    async def progress(self, text: str) -> None:
+        """发一条进度提示。它不会进入工具返回值。"""
+        if not text:
+            return
+        await (self.notify or self.send)(text)
+
 
 @dataclass(frozen=True)
 class TextCommand:

@@ -15,6 +15,7 @@ from src.runtime.conversation import (
     get_context_value,
     get_pending_questions,
 )
+from src.runtime.flow_map import command_modules, module_payload, step_payload
 from src.runtime.llm import complete_json
 from src.runtime.output_guard import sanitize as sanitize_output
 from src.runtime.tools import Tool
@@ -336,6 +337,26 @@ class MainAgentOrchestrator:
                 message,
             )
 
+        direct_route = self._route_from_direct_intent(
+            stripped,
+            self._allowed_natural_language_commands(channel.id),
+            self._conversation_id(channel),
+        )
+        if direct_route is not None:
+            self._log(
+                "direct_natural_language_dispatch "
+                f"channel_id={channel.id} command={direct_route.command_name} "
+                f"argument={direct_route.argument!r}"
+            )
+            return await self.dispatch_command(
+                client,
+                channel,
+                direct_route.command_name,
+                direct_route.argument,
+                attachments,
+                message,
+            )
+
         if self.is_allowed_for_command(
             channel.id, "running"
         ) and self._has_pending_running_questions(channel, stripped):
@@ -446,6 +467,7 @@ class MainAgentOrchestrator:
                 return None
 
             try:
+                self._emit_command_trace(channel, command_name)
                 handled = await self._registry.dispatch_command(
                     self._command_context(client, channel, read_only=True),
                     command_name,
@@ -460,6 +482,36 @@ class MainAgentOrchestrator:
                 return NaturalLanguageRoute(command_name, argument.strip(), 1.0, "explicit")
             await channel.send("我没有找到这个命令。")
             return None
+
+        # 自然语言走和 Discord 同一条主 Agent 循环。
+        # 在此之前网页还留在分类器那条老路上，同一句话两边行为不一样。
+        # read_only=True 由 _command_context 传下去，工具表会自动裁掉写工具。
+        direct_route = self._route_from_direct_intent(
+            stripped,
+            allowed_commands,
+            self._conversation_id(channel),
+        )
+        if direct_route is not None:
+            self._log(
+                "web_direct_natural_language_dispatch "
+                f"command={direct_route.command_name} argument={direct_route.argument!r}"
+            )
+            self._emit_command_trace(channel, direct_route.command_name)
+            await self._registry.dispatch_command(
+                self._command_context(client, channel, read_only=True),
+                direct_route.command_name,
+                direct_route.argument,
+            )
+            return direct_route
+
+        if self._main_agent_loop_enabled():
+            self._log("web_main_agent_loop")
+            await self._handle_ask(
+                self._command_context(client, channel, read_only=True),
+                stripped,
+                allowed_commands=allowed_commands,
+            )
+            return NaturalLanguageRoute("ask", stripped, 1.0, "main agent loop")
 
         if "running" in allowed_commands and self._has_pending_running_questions(
             channel, stripped
@@ -513,6 +565,7 @@ class MainAgentOrchestrator:
             f"command={route.command_name} argument={route.argument!r}"
         )
         try:
+            self._emit_command_trace(channel, route.command_name)
             await self._registry.dispatch_command(
                 self._command_context(client, channel, read_only=True),
                 route.command_name,
@@ -522,6 +575,19 @@ class MainAgentOrchestrator:
             await self._send_error(channel, f"执行 `{route.command_name}` 失败", exc)
             self._log(f"web_command_failed command={route.command_name} error={exc}")
         return route
+
+    def _emit_trace_step(self, channel: MessageChannel, module: str, why: str = "") -> None:
+        emit_step = getattr(channel, "trace_step", None)
+        if not callable(emit_step):
+            return
+        try:
+            emit_step(module_payload(module, why))
+        except Exception:
+            pass
+
+    def _emit_command_trace(self, channel: MessageChannel, command_name: str) -> None:
+        for module in command_modules(command_name):
+            self._emit_trace_step(channel, module, f"{command_name} · {module}")
 
     async def _handle_discord_admin(
         self,
@@ -670,6 +736,88 @@ class MainAgentOrchestrator:
         return bool(
             get_pending_questions(self._conversation_id(channel), PHOTO_MEMORY_TOPIC)
         )
+
+    def _route_from_direct_intent(
+        self,
+        content: str,
+        allowed_commands: tuple[str, ...],
+        conversation_id: str,
+    ) -> NaturalLanguageRoute | None:
+        """对高置信自然语言意图做代码级直通。
+
+        主 Agent loop 很适合开放问题，但「今天训练怎么样」这类话在产品上
+        是固定动作：读取最新 COROS 运动并生成 ShadowRunner 报告。这里先
+        拦住，避免模型把它当成 RAG 问答或普通 ask。
+        """
+        context_route = self._route_from_conversation_context(
+            content,
+            allowed_commands,
+            conversation_id,
+        )
+        if context_route is not None:
+            return context_route
+
+        if "coros" in allowed_commands and self._looks_like_daily_coros_report(content):
+            return NaturalLanguageRoute(
+                "coros",
+                content.strip(),
+                1.0,
+                "direct daily coros report",
+            )
+        return None
+
+    def _looks_like_daily_coros_report(self, content: str) -> bool:
+        text = content.strip().lower()
+        if not text:
+            return False
+
+        if any(
+            term in text
+            for term in (
+                "半马",
+                "全马",
+                "pb",
+                "个人最好",
+                "最好成绩",
+                "训练计划",
+                "计划",
+                "知识库",
+                "书",
+                "视频",
+            )
+        ):
+            return False
+
+        time_terms = (
+            "今天",
+            "今日",
+            "这次",
+            "刚才",
+            "刚刚",
+            "刚跑完",
+            "跑完",
+            "最近一次",
+            "最新",
+            "最近的",
+        )
+        activity_terms = ("训练", "运动", "跑步", "跑", "run", "workout")
+        report_terms = (
+            "怎么样",
+            "如何",
+            "分析",
+            "复盘",
+            "报告",
+            "总结",
+            "评价",
+            "下一次",
+            "下次",
+            "怎么练",
+        )
+
+        has_time_context = any(term in text for term in time_terms)
+        has_activity = any(term in text for term in activity_terms)
+        has_report_request = any(term in text for term in report_terms)
+        return has_time_context and has_activity and has_report_request
 
     async def _route_natural_language(
         self,
@@ -960,11 +1108,22 @@ User message:
                 if text and text.strip():
                     buffer.append(text.strip())
 
+            async def notify(text: str) -> None:
+                """进度提示直达用户，不进缓冲区。
+
+                这是 3.43 把命令包装成工具时漏掉的一条：那次只考虑了
+                「发文件的副作用照旧」，没考虑文字进度提示也是给人看的。
+                结果用户对着几十秒沉默干等。
+                """
+                if text and text.strip():
+                    await channel.send(sanitize_output(text.strip()))
+
             context = CommandContext(
                 client=client,
                 channel=channel,
                 send=capture,
                 send_chunks=capture,
+                notify=notify,
                 message=message,
                 conversation_id=self._conversation_id(channel),
                 read_only=read_only,
@@ -1002,17 +1161,30 @@ User message:
         read_only: bool = False,
         attachments: tuple[RuntimeAttachment, ...] = (),
         message: object | None = None,
+        allowed_commands: tuple[str, ...] | None = None,
     ) -> tuple[Tool, ...]:
-        """当前频道下，主 Agent 循环能用的全部工具。
+        """当前入口下，主 Agent 循环能用的全部工具。
 
         两类：能力交上来的只读工具（结构化取数），以及包装成工具的文本命令（执行动作）。
-        频道隔离和只读裁剪都在这里做——**权限决定谁进工具表，而不是事后拦截**。
+        隔离和只读裁剪都在这里做——**权限决定谁进工具表，而不是事后拦截**。
         模型看不见的工具就不可能调用它。
+
+        隔离机制按入口不同有两种：Discord 按频道号比对，网页按命令白名单。
+        网页的 channel.id 是 -1，永远匹配不上任何 Discord 频道号，
+        所以那边必须走白名单——否则工具表会是空的。
         """
-        tools: list[Tool] = list(self._read_tools_for_channel(channel.id))
+        by_allowlist = allowed_commands is not None
+        tools: list[Tool] = (
+            list(self._all_read_tools())
+            if by_allowlist
+            else list(self._read_tools_for_channel(channel.id))
+        )
 
         for channel_env_name, command in self._registry.tool_commands():
-            if channel_env_name is not None and not self._is_allowed_channel(
+            if by_allowlist:
+                if command.name not in allowed_commands:
+                    continue
+            elif channel_env_name is not None and not self._is_allowed_channel(
                 channel.id, channel_env_name
             ):
                 continue
@@ -1024,6 +1196,14 @@ User message:
                 )
             )
         return tuple(tools)
+
+    def _all_read_tools(self) -> tuple[Any, ...]:
+        """全部只读工具，不做频道过滤。给网页入口用。
+
+        只读工具按定义不改状态，所以在只读入口上不需要再按频道收窄——
+        网页本来就允许读取个人数据，这是明确选择过的。
+        """
+        return tuple(tool for _, tool in self._registry.read_tools())
 
     def _read_tools_for_channel(self, channel_id: int) -> tuple[Any, ...]:
         """当前频道能用的只读工具。
@@ -1045,6 +1225,7 @@ User message:
         context: CommandContext,
         question: str,
         client: object | None = None,
+        allowed_commands: tuple[str, ...] | None = None,
     ) -> None:
         """主 Agent 循环：模型自己查数据、自己决定动作、自己组织答案。"""
         question = question.strip()
@@ -1052,16 +1233,41 @@ User message:
             await context.send("你想问什么？")
             return
 
+        # 架构图高亮。只有网页入口实现了 trace_step，Discord 那边没有，
+        # 拿不到就退化成空操作——不给每个入口都塞一个假方法。
+        emit_step = getattr(context.channel, "trace_step", None)
+
+        def emit(payload: dict[str, Any]) -> None:
+            if not callable(emit_step):
+                return
+            try:
+                emit_step(payload)
+            except Exception:
+                # 画图失败不能拖垮回答本身
+                pass
+
+        emit({"type": "trace_step", "module": "entry", "label": "入口"})
+        emit({"type": "trace_step", "module": "loop", "label": "主 Agent 循环"})
+
         tools = self._loop_tools(
             client if client is not None else context.client,
             context.channel,
             read_only=context.read_only,
             attachments=context.attachments,
             message=context.message,
+            allowed_commands=allowed_commands,
         )
         if not tools:
             await context.send("这个频道没有可用的能力。")
             return
+
+        async def on_tool(name: str, why: str) -> None:
+            # why 是模型自己写的完整句子（「需要查看用户记录的所有比赛…」），
+            # 前面再加「正在」会拼出不通顺的中文，直接用原句。
+            if context.verbose_progress:
+                await context.progress(why.strip() or f"正在调用 {name}")
+
+            emit(step_payload(name, why))
 
         try:
             answer = await answer_open_question(
@@ -1069,11 +1275,14 @@ User message:
                 tools,
                 conversation_id=context.conversation_id,
                 log=self._log,
+                on_tool=on_tool,
             )
         except Exception as exc:
             await self._send_error(context.channel, "回答失败", exc)
             self._log(f"ask_failed error={exc}")
             return
+
+        emit({"type": "trace_step", "module": "answer", "label": "生成回答"})
         await context.send_chunks(answer)
 
     def _main_agent_loop_enabled(self) -> bool:
@@ -1222,6 +1431,8 @@ User message:
             channel=channel,
             send=send_text,
             send_chunks=send_chunks,
+            notify=getattr(channel, "notify", None) or send_text,
+            verbose_progress=bool(getattr(channel, "verbose_progress", False)),
             message=message,
             conversation_id=self._conversation_id(channel),
             read_only=read_only,

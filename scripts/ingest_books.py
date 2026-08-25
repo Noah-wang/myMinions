@@ -34,6 +34,26 @@ from src.runtime.embeddings import embed_texts, embedding_configured, get_embedd
 KNOWLEDGE_DIR = ROOT_DIR / "data" / "knowledge" / "coros-report"
 BOOKS_DIR = KNOWLEDGE_DIR / "books"
 VIDEOS_DIR = KNOWLEDGE_DIR / "videos"
+
+# 语料分类。检索时按它过滤，避免不同主题互相挤占名额。
+#
+# 现在语料是 136 块书 + 9 块视频，书占 94%。往同一个索引里持续灌入
+# 跑鞋测评这类新主题，训练类问题会被逐渐挤下去——3.26 否掉混合检索时
+# 就见过这个现象：排序一被扰动，book_hit 从 1.00 掉到 0.91。
+#
+# 分类从**目录名**推导，不额外维护映射文件：放在 videos/shoes/ 下的就是
+# shoes 类，直接放在 videos/ 根下的归入默认类。目录即声明，不会对不上。
+DEFAULT_CATEGORY = "training"
+
+
+def category_for(path: Path, base: Path) -> str:
+    """按文件相对于 books/ 或 videos/ 的子目录名决定分类。"""
+    try:
+        relative = path.resolve().relative_to(base.resolve())
+    except ValueError:
+        return DEFAULT_CATEGORY
+    parts = relative.parts
+    return parts[0] if len(parts) > 1 else DEFAULT_CATEGORY
 CHUNKS_PATH = KNOWLEDGE_DIR / "chunks.json"
 INDEX_PATH = KNOWLEDGE_DIR / "index.json"
 EMBEDDINGS_PATH = KNOWLEDGE_DIR / "embeddings.json"
@@ -150,14 +170,30 @@ def find_break(text: str, start: int, end: int) -> int:
     return end
 
 
+def header_field(text: str, key: str) -> str:
+    """取视频 md 头部的某个字段。"""
+    match = re.search(rf"^{key}:\s*(.+)$", text[:600], re.M)
+    return match.group(1).strip() if match else ""
+
+
 def video_context(text: str, source: str) -> str:
     """从视频 md 的头部抽出文档级前缀。
 
     原来这段头部只落在第 1 块里，第 2 块之后完全不知道自己是哪个视频。
+
+    优先用标题而不是 BV 号：前缀是要参与嵌入的，而「BV1XouM6BER3」
+    没有任何语义，「美津浓WaveSky9实战报告」才能让「美津浓怎么样」
+    这类查询命中这条视频的每一块。
     """
-    bv = re.search(r"Source:\s*(\S+)", text)
-    label = bv.group(1) if bv else source
-    return f"B站跑步视频字幕 {label}"
+    title = header_field(text, "Title")
+    uploader = header_field(text, "Uploader")
+    if title:
+        # UP 主也放进前缀。同一个博主的用词和评测风格是连贯的，
+        # 「东哥怎么评价这双鞋」这类问题需要它才能命中。
+        prefix = f"B站跑步视频字幕《{title}》"
+        return f"{prefix} UP主：{uploader}" if uploader else prefix
+    bv = header_field(text, "Source")
+    return f"B站跑步视频字幕 {bv or source}"
 
 
 def chunk_document(
@@ -166,6 +202,8 @@ def chunk_document(
     text: str,
     spans: list[tuple[int, int]],
     context: str,
+    category: str = DEFAULT_CATEGORY,
+    uploader: str = "",
 ) -> list[dict[str, Any]]:
     chunks: list[dict[str, Any]] = []
     start = 0
@@ -180,6 +218,8 @@ def chunk_document(
                     "id": f"{source}:p{page}:c{len(chunks) + 1}",
                     "source": source,
                     "kind": kind,
+                    "category": category,
+                    "uploader": uploader,
                     "page": page,
                     "page_end": page_at(spans, max(end - 1, start)),
                     # text 是原文，用于展示引用；context 只参与嵌入，不展示
@@ -382,7 +422,8 @@ def build_chunks() -> tuple[list[dict[str, Any]], dict[str, int]]:
     raw: list[dict[str, Any]] = []
     boilerplate_lines = 0
 
-    for pdf_path in sorted(BOOKS_DIR.glob("*.pdf")):
+    # rglob 而不是 glob：分类靠子目录表达，所以必须往下走一层
+    for pdf_path in sorted(BOOKS_DIR.rglob("*.pdf")):
         pages = extract_pdf(pdf_path)
         if not pages:
             continue
@@ -390,10 +431,17 @@ def build_chunks() -> tuple[list[dict[str, Any]], dict[str, int]]:
         boilerplate_lines += removed
         text, spans = build_document(pages)
         raw.extend(
-            chunk_document(pdf_path.name, "book", text, spans, f"《{pdf_path.stem}》")
+            chunk_document(
+                pdf_path.name,
+                "book",
+                text,
+                spans,
+                f"《{pdf_path.stem}》",
+                category_for(pdf_path, BOOKS_DIR),
+            )
         )
 
-    for text_path in sorted([*VIDEOS_DIR.glob("*.md"), *VIDEOS_DIR.glob("*.txt")]):
+    for text_path in sorted([*VIDEOS_DIR.rglob("*.md"), *VIDEOS_DIR.rglob("*.txt")]):
         pages = extract_text_document(text_path)
         if not pages:
             continue
@@ -405,6 +453,8 @@ def build_chunks() -> tuple[list[dict[str, Any]], dict[str, int]]:
                 text,
                 spans,
                 video_context(text, text_path.name),
+                category_for(text_path, VIDEOS_DIR),
+                header_field(text, "Uploader"),
             )
         )
 

@@ -8,7 +8,8 @@ from typing import Any
 ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT_DIR))
 
-from src.orchestrator import MainAgentOrchestrator  # noqa: E402
+from src.orchestrator import MainAgentOrchestrator
+from src.runtime.flow_map import MODULES, TOOL_MODULES  # noqa: E402
 
 
 RUNNING_CHANNEL_ID = "111"
@@ -60,16 +61,74 @@ def judge_loop_tools(
     )
 
 
+def judge_flow_map(
+    orchestrator: MainAgentOrchestrator,
+    case: dict[str, Any],
+) -> CaseResult:
+    """每个能被模型调用的工具，都要能在架构图上找到落点。
+
+    没映射的工具会静默归到「主 Agent 循环」，图上看起来像什么都没查——
+    这种错不会报异常，只会让图说谎。所以加一条守卫：
+    新增工具时忘了更新 flow_map，这里会红。
+    """
+    tools = orchestrator._loop_tools(
+        None,
+        _FakeChannel(_channel_id(case["channel"])),
+        read_only=case.get("read_only", False),
+    )
+    # no_lookup_needed 是「不用查任何数据」的出口，本来就不该有数据模块
+    unmapped = sorted(
+        tool.name
+        for tool in tools
+        if tool.name not in TOOL_MODULES and tool.name != "no_lookup_needed"
+    )
+    unknown = sorted(
+        name for name, module in TOOL_MODULES.items() if module not in MODULES
+    )
+    return CaseResult(
+        case_id=case["id"],
+        passed=not unmapped and not unknown,
+        tags=("flow_map",),
+        expected={"unmapped": [], "unknown_module": []},
+        actual={"unmapped": unmapped, "unknown_module": unknown},
+    )
+
+
 def judge_case(
     orchestrator: MainAgentOrchestrator,
     case: dict[str, Any],
 ) -> CaseResult:
+    if case.get("kind") == "flow_map":
+        return judge_flow_map(orchestrator, case)
+
     if case.get("kind") == "loop_tools":
         return judge_loop_tools(orchestrator, case)
 
     allowed_commands = orchestrator._allowed_natural_language_commands(
         _channel_id(case["channel"])
     )
+    if case.get("kind") == "direct_route":
+        route = orchestrator._route_from_direct_intent(
+            case["message"],
+            allowed_commands,
+            f"eval:{case['id']}",
+        )
+        actual = None
+        if route is not None:
+            actual = {
+                "command": route.command_name,
+                "argument": route.argument,
+            }
+
+        expected = case["expected_route"]
+        return CaseResult(
+            case_id=case["id"],
+            passed=actual == expected,
+            tags=tuple(case.get("tags", [])),
+            expected=expected,
+            actual=actual,
+        )
+
     route = orchestrator._route_from_llm_response(
         case["llm_response"],
         case["message"],
@@ -96,6 +155,7 @@ def judge_case(
 def score_results(results: list[CaseResult]) -> dict[str, float]:
     return {
         "loop_tool_exposure": _tag_score(results, "loop_tools"),
+        "flow_map_coverage": _tag_score(results, "flow_map"),
         "route_accuracy": _tag_score(results, "positive"),
         "rejection_accuracy": _tag_score(results, "negative"),
         "cross_channel_rejection": _tag_score(results, "cross_channel"),

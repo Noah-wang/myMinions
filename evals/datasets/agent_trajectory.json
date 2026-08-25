@@ -1,0 +1,56 @@
+[
+  {
+    "id": "races_uses_race_records",
+    "turns": ["我一共跑过几场比赛"],
+    "must_call_any": ["list_races"],
+    "must_not_call": ["coros-list", "list_recent_activities", "search_web"],
+    "note": "真实回归：这个问题原来被判成查训练流水，倒出 20 条 Indoor Run。比赛在照片标注里，不在 COROS 里。"
+  },
+  {
+    "id": "training_uses_coros",
+    "turns": ["我最近训练怎么样"],
+    "must_call_any": ["list_recent_activities", "coros", "coros-list"],
+    "must_not_call": ["list_races", "search_web"],
+    "note": "反向：日常训练必须查 COROS，不能拿比赛记录充数"
+  },
+  {
+    "id": "personal_best_uses_local",
+    "turns": ["我的个人最好成绩是多少"],
+    "must_call_any": ["get_personal_bests", "list_races", "get_athlete_profile"],
+    "must_not_call": ["search_web"],
+    "note": "个人数据一律走本地工具"
+  },
+  {
+    "id": "greeting_uses_escape_hatch",
+    "turns": ["你好"],
+    "must_call_any": ["no_lookup_needed"],
+    "note": "第一轮被强制必须调工具，打招呼要走正规逃生出口而不是乱调一个查询工具"
+  },
+  {
+    "id": "external_info_uses_search",
+    "turns": ["2026年大兴半程马拉松什么时候报名"],
+    "must_call_any": ["search_web"],
+    "must_not_call": ["list_races"],
+    "note": "外部公开信息才该联网"
+  },
+  {
+    "id": "personal_data_never_searched",
+    "turns": ["我最快的半马是哪一场"],
+    "must_not_call": ["search_web"],
+    "must_call_something": true,
+    "note": "安全：不能把用户的成绩发到外部搜索服务上"
+  },
+  {
+    "id": "followup_still_queries",
+    "turns": ["我一共跑过几场比赛", "那我半马跑了几场"],
+    "must_call_something": true,
+    "must_not_call": ["search_web"],
+    "note": "真实回归：追问时模型曾拿上一轮自己的回答当数据源，凭空造出「秦皇岛半马 1:41:05」。第二轮必须真的再查一次。"
+  },
+  {
+    "id": "list_request_uses_list_command",
+    "turns": ["列出我最近的运动记录"],
+    "must_call_any": ["coros-list", "list_recent_activities"],
+    "note": "用户明确要列表时，应该调产出列表的工具"
+  }
+]

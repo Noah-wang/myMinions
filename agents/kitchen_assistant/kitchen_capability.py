@@ -78,7 +78,7 @@ async def _add_recipe(context: CommandContext, video_input: str) -> None:
         await context.send("请提供 B站 BV号或视频链接。")
         return
 
-    await context.send("正在抓取 B站字幕...")
+    await context.progress("正在抓取 B站字幕...")
     try:
         subtitle = await fetch_bilibili_subtitle(video_input)
     except Exception as exc:

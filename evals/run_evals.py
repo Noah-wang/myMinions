@@ -57,8 +57,16 @@ def run_rag_retrieval_suite() -> tuple[dict[str, float], list[Any], dict[str, An
         return [await rag_retrieval.judge_case(case) for case in dataset]
 
     case_results = asyncio.run(_run())
+    category_cases = _load_json(ROOT_DIR / spec["category_dataset"])
+    category_results = [
+        rag_retrieval.judge_category_filter(case) for case in category_cases
+    ]
     metrics = rag_retrieval.score_results(case_results, dataset)
-    return metrics, case_results, spec, ""
+    passed = sum(r.passed for r in category_results)
+    metrics["category_filter_correctness"] = (
+        passed / len(category_results) if category_results else 1.0
+    )
+    return metrics, case_results + category_results, spec, ""
 
 
 def run_photo_memory_suite() -> tuple[dict[str, float], list[Any], dict[str, Any]]:
@@ -112,8 +120,9 @@ def run_prompt_injection_suite() -> tuple[dict[str, float], list[Any], dict[str,
     gate = [prompt_injection.judge_write_gate(c) for c in dataset["write_gate"]]
     output = [prompt_injection.judge_output_guard(c) for c in dataset.get("output_guard", [])]
     rate = [prompt_injection.judge_rate_limit(c) for c in dataset.get("rate_limit", [])]
-    metrics = prompt_injection.score_results(defang, gate, output, rate)
-    return metrics, defang + gate + output + rate, spec
+    budget = [prompt_injection.judge_search_budget(c) for c in dataset.get("search_budget", [])]
+    metrics = prompt_injection.score_results(defang, gate, output, rate, budget)
+    return metrics, defang + gate + output + rate + budget, spec
 
 
 def _print_suite_result(

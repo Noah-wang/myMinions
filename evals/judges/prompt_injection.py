@@ -169,11 +169,54 @@ def judge_rate_limit(case: dict[str, Any]) -> InjectionCaseResult:
     )
 
 
+def judge_search_budget(case: dict[str, Any]) -> InjectionCaseResult:
+    """联网搜索的每日预算。
+
+    搜索按次收费，而公开网页入口没有认证。限流只保证「每分钟不超过 N 次」，
+    一天累计仍然可能烧掉整个额度，所以预算是独立的一层。
+
+    预算落在 memory 的 caches 里，用临时文件跑，不碰真实数据。
+    """
+    import os
+    import tempfile
+    from pathlib import Path as _Path
+
+    import src.runtime.memory as memory
+    from src.integrations import web_search
+
+    original_path = memory.MEMORY_PATH
+    original_limit = os.environ.get("WEB_SEARCH_DAILY_LIMIT")
+    with tempfile.TemporaryDirectory() as folder:
+        memory.MEMORY_PATH = _Path(folder) / "memory.json"
+        os.environ["WEB_SEARCH_DAILY_LIMIT"] = str(case["limit"])
+        allowed = 0
+        try:
+            for _ in range(case["attempts"]):
+                try:
+                    web_search._consume_budget()
+                    allowed += 1
+                except web_search.SearchUnavailable:
+                    pass
+        finally:
+            memory.MEMORY_PATH = original_path
+            if original_limit is None:
+                os.environ.pop("WEB_SEARCH_DAILY_LIMIT", None)
+            else:
+                os.environ["WEB_SEARCH_DAILY_LIMIT"] = original_limit
+
+    actual = {"allowed": allowed}
+    expected = {"allowed": case["expect_allowed"]}
+    return InjectionCaseResult(
+        case_id=case["id"], passed=actual == expected, expected=expected, actual=actual
+    )
+
+
 def score_results(
     defang: list[InjectionCaseResult],
     gate: list[InjectionCaseResult],
     output: list[InjectionCaseResult] | None = None,
     rate: list[InjectionCaseResult] | None = None,
+    budget: list[InjectionCaseResult] | None = None,
 ) -> dict[str, float]:
     def _rate(results: list[InjectionCaseResult]) -> float:
         return sum(r.passed for r in results) / len(results) if results else 1.0
@@ -183,4 +226,5 @@ def score_results(
         "write_gate_correctness": _rate(gate),
         "output_guard_correctness": _rate(output or []),
         "rate_limit_correctness": _rate(rate or []),
+        "search_budget_correctness": _rate(budget or []),
     }

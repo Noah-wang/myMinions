@@ -29,6 +29,10 @@
     "loop_tool_exposure": {
       "description": "Fraction of cases where the tool table the main-agent loop builds for a channel matches exactly. Permission now lives in the tool table: a write tool that never appears cannot be called. Exact-set matching, because both a missing read tool and an extra write tool are defects.",
       "threshold": 1.0
+    },
+    "flow_map_coverage": {
+      "threshold": 1.0,
+      "description": "暴露给模型的工具全部能映射到架构图模块；漏一个图就会说谎"
     }
   },
   "constraints": [

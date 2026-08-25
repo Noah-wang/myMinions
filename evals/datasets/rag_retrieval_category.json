@@ -1,0 +1,56 @@
+[
+  {
+    "id": "filters_to_requested_category",
+    "categories": [
+      "training",
+      "shoes",
+      "training",
+      "shoes"
+    ],
+    "filter": "shoes",
+    "expect_kept": [
+      "shoes",
+      "shoes"
+    ],
+    "note": "基本行为：只留指定分类"
+  },
+  {
+    "id": "empty_filter_keeps_all",
+    "categories": [
+      "training",
+      "shoes"
+    ],
+    "filter": null,
+    "expect_kept": [
+      "training",
+      "shoes"
+    ],
+    "note": "不指定分类时全库检索，跨主题问题需要这个"
+  },
+  {
+    "id": "unknown_category_falls_back_to_all",
+    "categories": [
+      "training",
+      "shoes"
+    ],
+    "filter": "nutrition",
+    "expect_kept": [
+      "training",
+      "shoes"
+    ],
+    "note": "核心：模型写了个不存在的分类时必须退回全部。返回空会让检索静默失效，看起来像知识库里没有。"
+  },
+  {
+    "id": "category_with_no_match_falls_back",
+    "categories": [
+      "training",
+      "training"
+    ],
+    "filter": "shoes",
+    "expect_kept": [
+      "training",
+      "training"
+    ],
+    "note": "分类合法但当前语料里没有这一类，同样退回全部而不是空"
+  }
+]

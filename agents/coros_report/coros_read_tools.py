@@ -15,7 +15,7 @@ from typing import Any
 from agents.coros_report.activity_browser import query_activity_records, summarize_activity
 from agents.coros_report.personal_bests import format_personal_bests
 from agents.coros_report.running_profile import read_athlete_profile
-from src.runtime.rag import format_context, search_knowledge
+from src.runtime.rag import format_context, known_categories, search_knowledge
 from src.runtime.tools import Tool
 
 
@@ -46,9 +46,16 @@ async def list_recent_activities(range_text: str = "最近 30 天") -> dict[str,
     }
 
 
-async def search_running_knowledge(query: str, limit: int = 3) -> str:
-    """在跑步书籍和视频知识库里检索。"""
-    chunks = await search_knowledge(query, limit=limit)
+async def search_running_knowledge(
+    query: str, limit: int = 3, category: str = ""
+) -> str:
+    """在跑步书籍和视频知识库里检索。
+
+    category 由模型自己判断该查哪一类。这是 3.36 学到的模式：
+    不要用规则去猜，把选择权交给已经看得见候选集的那一方。
+    不确定就留空，全库查。
+    """
+    chunks = await search_knowledge(query, limit=limit, category=category or None)
     if not chunks:
         return f"知识库里没有找到和「{query}」相关的内容。"
     return format_context(chunks)
@@ -99,13 +106,21 @@ KNOWLEDGE_TOOL = Tool(
     name="search_running_knowledge",
     description=(
         "在用户导入的跑步书籍和视频知识库里检索。"
-        "回答训练方法、生理学、配速安排这类需要外部依据的问题时用它。"
+        "回答训练方法、生理学、配速安排、跑鞋装备这类需要资料依据的问题时用它。"
+        "知识库按主题分类，用 category 收窄可以避免不相关的主题挤占结果。"
     ),
     parameters={
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "检索关键词"},
             "limit": {"type": "integer", "description": "返回几段，默认 3"},
+            "category": {
+                "type": "string",
+                "description": (
+                    "限定主题分类。training=训练方法和生理学，shoes=跑鞋装备。"
+                    "**不确定或者问题跨主题时留空**，留空是全库检索。"
+                ),
+            },
         },
         "required": ["query"],
     },

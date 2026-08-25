@@ -1,0 +1,25 @@
+{
+  "name": "agent_trajectory",
+  "version": "1.0.0",
+  "objective": "Guard which tools the main agent actually reaches for. This is the only suite that calls the real chat model; the other five use stubs, so a model swap would leave them all green.",
+  "unit_under_test": "src/ask.py, src/runtime/tools.py, src/orchestrator.py",
+  "dataset": "evals/datasets/agent_trajectory.json",
+  "judge": "evals/judges/agent_trajectory.py",
+  "metrics": {
+    "tool_choice_accuracy": {
+      "description": "Fraction of runs where the final turn called an acceptable tool and avoided the forbidden ones. Asserts the trajectory, not the answer text: wording varies run to run, while picking the wrong data source is the defect that actually happened.",
+      "threshold": 0.9
+    }
+  },
+  "constraints": [
+    "This suite calls the real model and costs money, so it is deliberately NOT part of run_evals.py. Run it before a deploy that touches prompts, tools or the loop.",
+    "Assertions never depend on the user's current data. Checking for '8 races' would go red when a race is added, which is a data change rather than a defect.",
+    "Threshold is 0.9, not 1.0: the model is non-deterministic and one flaky run should not fail the suite. Use --repeat to distinguish noise from real regression.",
+    "Only the final turn is asserted. Earlier turns exist to build up the context that triggers the defect under test."
+  ],
+  "baseline": {
+    "measured_at": "2026-08-23",
+    "cases": 8,
+    "note": "建立时锁住两个真实缺陷：比赛问题被查成训练流水；追问时拿上一轮回答当数据源、编出不存在的比赛。"
+  }
+}

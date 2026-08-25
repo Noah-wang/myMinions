@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 from dataclasses import asdict, dataclass
 from http import HTTPStatus
@@ -13,6 +14,7 @@ from urllib.parse import quote, unquote, urlparse
 from dotenv import load_dotenv
 
 from src.runtime import ratelimit
+from src.runtime.flow_map import module_payload
 from src.runtime.trace import log_event
 
 
@@ -75,6 +77,18 @@ SAMPLE_ACTIONS = (
         "title": "查洛杉矶马拉松照片",
         "description": "",
         "prompt": "查洛杉矶马拉松照片",
+        "mode": "web",
+    },
+    {
+        "title": "按我的水平选跑鞋",
+        "description": "",
+        "prompt": "根据我的实际水平和目标，我下一场马拉松该穿什么鞋？",
+        "mode": "web",
+    },
+    {
+        "title": "查跑鞋测评",
+        "description": "",
+        "prompt": "知识库里有哪些跑鞋测评？挑几双适合我的说说",
         "mode": "web",
     },
     {
@@ -231,6 +245,21 @@ def _demo_response(prompt: str) -> DemoResponse:
     )
 
 
+def _demo_trace_modules(prompt: str) -> tuple[str, ...]:
+    route = _route_prompt(prompt)
+    if route == "activity-list":
+        return ("entry", "router", "capability", "coros", "answer")
+    if route == "pb":
+        return ("entry", "router", "capability", "profile", "answer")
+    if route == "photo":
+        return ("entry", "router", "capability", "races", "answer")
+    if route == "kitchen":
+        return ("entry", "router", "capability", "kitchen", "llm", "answer")
+    if route == "evals":
+        return ("entry", "router", "loop", "answer")
+    return ("entry", "router", "capability", "profile", "knowledge", "llm", "answer")
+
+
 REPORT_PATH = ROOT_DIR / "docs" / "project-iteration-report.md"
 RAG_DOC_PATH = ROOT_DIR / "docs" / "rag-pipeline.md"
 
@@ -358,7 +387,9 @@ class WebHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/health":
             self._send(
-                *_json_response({"ok": True, "domain": "agent.noahwang.run"}),
+                *_json_response(
+                    {"ok": True, "domain": os.getenv("WEB_PUBLIC_DOMAIN", "localhost")}
+                ),
                 include_body=include_body,
             )
             return
@@ -484,7 +515,8 @@ class WebHandler(BaseHTTPRequestHandler):
                 asyncio.run(_stream_real_chat(prompt, emit, conversation_id))
             else:
                 response = _demo_response(prompt)
-                emit({"type": "trace", "result": asdict(response)})
+                for module in _demo_trace_modules(prompt):
+                    emit(module_payload(module, f"demo · {module}"))
                 emit({"type": "message", "message": response.message})
             emit({"type": "done"})
         except BrokenPipeError:
@@ -1001,6 +1033,161 @@ def _data_photos_section() -> dict[str, Any]:
     }
 
 
+def _knowledge_category(path: Path, base: Path) -> str:
+    """分类取自子目录名。直接放在 base 下的算默认类。"""
+    try:
+        parts = path.resolve().relative_to(base.resolve()).parts
+    except ValueError:
+        return "training"
+    return parts[0] if len(parts) > 1 else "training"
+
+
+def _video_header(path: Path) -> dict[str, str]:
+    """读视频 md 头部的元数据。"""
+    try:
+        head = path.read_text(encoding="utf-8")[:600]
+    except OSError:
+        return {}
+    fields: dict[str, str] = {}
+    for key in ("Source", "Title", "Uploader", "UploaderId", "Imported at"):
+        match = re.search(rf"^{re.escape(key)}:\s*(.+)$", head, re.M)
+        if match:
+            fields[key] = match.group(1).strip()
+    return fields
+
+
+CATEGORY_LABELS = {"shoes": "跑鞋装备", "training": "训练理论"}
+
+
+def _subscription_progress() -> dict[str, dict[str, Any]]:
+    """每个订阅源的回填进度：已导入多少 / 一共多少。
+
+    订阅了但一条都没导入的 UP 主也要出现在页面上，否则刚订阅完看不到任何反馈，
+    像是没生效。总数取自同步脚本的列表缓存，不额外请求 B 站。
+    """
+    from src.runtime.knowledge_sources import load_sources
+
+    base = ROOT_DIR / "data" / "knowledge" / "coros-report"
+    cache_dir = base / ".video-index"
+
+    imported: dict[int, int] = {}
+    for path in (base / "videos").rglob("*.md"):
+        header = _video_header(path)
+        try:
+            uid = int(header.get("UploaderId", 0) or 0)
+        except ValueError:
+            continue
+        imported[uid] = imported.get(uid, 0) + 1
+
+    progress: dict[str, dict[str, Any]] = {}
+    for source in load_sources():
+        uid = int(source.get("uid", 0) or 0)
+        total = 0
+        cache_path = cache_dir / f"{uid}.json"
+        if cache_path.exists():
+            try:
+                total = len(json.loads(cache_path.read_text(encoding="utf-8")).get("videos", []))
+            except (OSError, json.JSONDecodeError):
+                total = 0
+        progress[str(uid)] = {
+            "uid": uid,
+            "name": source.get("name") or f"UID {uid}",
+            "category": source.get("category", "training"),
+            "imported": imported.get(uid, 0),
+            "total": total,
+        }
+    return progress
+
+
+def _knowledge_tree() -> list[dict[str, Any]]:
+    """按 内容方向 → UP主/来源 → 单条资料 组织知识库。
+
+    原来是一个平铺的卡片列表，二十多条视频堆在一起看不出结构。
+    分类和 UP 主本来就是数据里已有的字段，只是没被用来组织展示。
+    """
+    base = ROOT_DIR / "data" / "knowledge" / "coros-report"
+    buckets: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    progress = _subscription_progress()
+    by_name = {p["name"]: p for p in progress.values()}
+
+    for file_path in sorted((base / "books").rglob("*.pdf")):
+        category = _knowledge_category(file_path, base / "books")
+        buckets.setdefault(category, {}).setdefault("书籍", []).append(
+            {
+                "title": file_path.stem,
+                "meta": f"PDF · {_file_size(file_path)}",
+                "prompt": f"根据《{file_path.stem}》回答我的训练问题",
+            }
+        )
+
+    for file_path in sorted((base / "videos").rglob("*.md")):
+        category = _knowledge_category(file_path, base / "videos")
+        header = _video_header(file_path)
+        uploader = header.get("Uploader") or "未标注来源"
+        buckets.setdefault(category, {}).setdefault(uploader, []).append(
+            {
+                "title": header.get("Title") or file_path.stem,
+                "meta": f"{header.get('Source', '')} · {_file_size(file_path)}",
+                "imported_at": header.get("Imported at", ""),
+                "prompt": f"根据「{header.get('Title') or file_path.stem}」这条内容回答我",
+            }
+        )
+
+    # 订阅了但一条还没导入的来源也要占个位，显示「待同步」。
+    for item in progress.values():
+        buckets.setdefault(item["category"], {}).setdefault(item["name"], [])
+
+    tree: list[dict[str, Any]] = []
+    for category in sorted(buckets, key=lambda c: (c != "training", c)):
+        groups = []
+        for uploader in sorted(buckets[category]):
+            items = sorted(
+                buckets[category][uploader],
+                key=lambda i: i.get("imported_at", ""),
+                reverse=True,
+            )
+            info = by_name.get(uploader, {})
+            total = int(info.get("total", 0) or 0)
+            groups.append(
+                {
+                    "name": uploader,
+                    "count": len(items),
+                    "uid": info.get("uid", 0),
+                    # 回填进度。总数是 0 说明还没抓过列表，这时不显示分母。
+                    "progress": f"{len(items)}/{total}" if total else str(len(items)),
+                    "pending": max(total - len(items), 0),
+                    "items": items,
+                }
+            )
+        # 有内容的排前面，待同步的排后面
+        groups.sort(key=lambda g: (g["count"] == 0, g["name"]))
+        tree.append(
+            {
+                "key": category,
+                "label": CATEGORY_LABELS.get(category, category),
+                "count": sum(g["count"] for g in groups),
+                "groups": groups,
+            }
+        )
+    return tree
+
+
+def _video_title(path: Path) -> str:
+    """优先用文件头里的 Title，退回文件名。
+
+    文件名是 `BV14jbv6nE6d-【李宁京东200档跑鞋新手优选】` 这种，
+    带着 BV 前缀不好看；头部的 Title 才是干净的标题。
+    """
+    try:
+        head = path.read_text(encoding="utf-8")[:400]
+    except OSError:
+        return path.stem
+    match = re.search(r"^Title:\s*(.+)$", head, re.M)
+    if match and match.group(1).strip():
+        return match.group(1).strip()
+    return path.stem
+
+
 def _data_rag_section() -> dict[str, Any]:
     base = ROOT_DIR / "data" / "knowledge" / "coros-report"
     build_info = _read_json(base / "build_info.json", {})
@@ -1008,25 +1195,9 @@ def _data_rag_section() -> dict[str, Any]:
     chunks_count = _json_count(base / "chunks.json")
     items: list[dict[str, Any]] = []
 
-    for file_path in sorted((base / "books").glob("*.pdf")):
-        items.append(
-            {
-                "title": file_path.name,
-                "meta": f"书籍 · {_file_size(file_path)}",
-                "description": "训练问答会从这类资料中检索原文，再把引用放进回答。",
-                "prompt": "根据跑步书籍回答我的训练问题",
-            }
-        )
-
-    for file_path in sorted((base / "videos").glob("*.md")):
-        items.append(
-            {
-                "title": file_path.stem,
-                "meta": f"视频字幕知识 · {_file_size(file_path)}",
-                "description": "长视频字幕会被切分并进入同一个跑步知识库。",
-                "prompt": "根据已导入的视频知识给我训练建议",
-            }
-        )
+    # 资料条目改由 tree 承载（内容方向 → UP主 → 单条），
+    # items 只保留索引和向量库这类整体信息。
+    # 二十多条视频平铺成卡片是看不出结构的，而分类和 UP 主本来就在数据里。
 
     if isinstance(build_info, dict):
         config = build_info.get("config")
@@ -1066,6 +1237,7 @@ def _data_rag_section() -> dict[str, Any]:
         "key": "rag",
         "title": "RAG 知识库",
         "description": "跑步书籍、视频字幕、chunk 和 embedding。",
+        "tree": _knowledge_tree(),
         "items": items,
     }
 
@@ -1234,17 +1406,27 @@ class WebChannel:
         self._emit = emit
         self.messages: list[str] = []
 
+    # 网页有独立的 status 事件承载进度，显示完就消失、不进对话记录，
+    # 所以可以把工具级的进度也推过来。Discord 只能发真实消息，那边默认关。
+    verbose_progress = True
+
     async def send(self, content: str) -> None:
         self.messages.append(content)
         self._emit({"type": "message", "message": content})
+
+    async def notify(self, content: str) -> None:
+        """进度提示。走 status 事件，前端显示在「思考中」那一行，不落进对话。"""
+        self._emit({"type": "status", "message": content})
+
+    def trace_step(self, payload: dict[str, Any]) -> None:
+        """把一次工具调用映射成的架构模块推给前端，用来在架构图上高亮。"""
+        self._emit(payload)
 
 
 def _ensure_agent_paths() -> None:
     paths = (
         ROOT_DIR,
-        ROOT_DIR / "agents" / "kitchen-assistant" / "agent",
-        ROOT_DIR / "agents" / "coros-report" / "agent",
-        ROOT_DIR / "agents" / "photo-memory" / "agent",
+        # 包化之后 agents 是正规包，只要仓库根在 sys.path 上就够了
     )
     for path in paths:
         value = str(path)
