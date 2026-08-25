@@ -284,6 +284,13 @@ async function playFlowQueue() {
 
 function flowStep(module, hint) {
   if (!module) return;
+  const queuedLast = flowQueue.at(-1)?.module || lastFlowModule;
+  if (module === "answer" && queuedLast && queuedLast !== "reflection") {
+    if (queuedLast !== "llm") {
+      flowQueue.push({ module: "llm", hint: "工具返回结果交给 LLM 生成回答" });
+    }
+    flowQueue.push({ module: "reflection", hint: "检查回答是否还需要补充检索" });
+  }
   flowQueue.push({ module, hint });
   playFlowQueue();
 }

@@ -132,6 +132,7 @@ async def run_tool_loop(
     log: Callable[[str], None] | None = None,
     force_first_tool: bool = False,
     on_tool: Callable[[str, str], Any] | None = None,
+    used_tools: list[str] | None = None,
 ) -> str:
     """跑一轮完整的工具调用循环，返回模型的最终文本回答。
 
@@ -188,6 +189,8 @@ async def run_tool_loop(
 
         for call in tool_calls:
             arguments = _parse_arguments(call.function.arguments)
+            if used_tools is not None:
+                used_tools.append(call.function.name)
             # 日志打在执行**之前**。打在之后的话，挂住的工具在日志里完全看不见——
             # 只能看到进了循环，然后没有下文，排查时根本不知道卡在哪一个工具上。
             log_event(

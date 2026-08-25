@@ -111,8 +111,13 @@
                   <strong>LLM 生成</strong>
                   <small>整合上下文并组织回答</small>
                 </div>
-                <div class="flow-node" data-module="answer" role="listitem">
+                <div class="flow-node" data-module="reflection" role="listitem">
                   <span class="flow-index">13</span>
+                  <strong>反思检查</strong>
+                  <small>判断是否需要补查或追问</small>
+                </div>
+                <div class="flow-node" data-module="answer" role="listitem">
+                  <span class="flow-index">14</span>
                   <strong>回答</strong>
                   <small>输出到当前对话</small>
                 </div>
@@ -134,7 +139,8 @@
               <div class="flow-edge" data-from="races" data-to="llm" aria-hidden="true"></div>
               <div class="flow-edge" data-from="search" data-to="llm" aria-hidden="true"></div>
               <div class="flow-edge" data-from="kitchen" data-to="llm" aria-hidden="true"></div>
-              <div class="flow-edge" data-from="llm" data-to="answer" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="llm" data-to="reflection" aria-hidden="true"></div>
+              <div class="flow-edge" data-from="reflection" data-to="answer" aria-hidden="true"></div>
             </div>
           </div>
         </section>

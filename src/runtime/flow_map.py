@@ -24,6 +24,7 @@ MODULES: dict[str, str] = {
     "search": "联网搜索",
     "kitchen": "后厨数据",
     "llm": "LLM 生成",
+    "reflection": "反思检查",
     "answer": "生成回答",
 }
 
@@ -46,6 +47,7 @@ TOOL_MODULES: dict[str, str] = {
     "running-video": "knowledge",
     "knowledge-source": "knowledge",
     "search_web": "search",
+    "reflection": "reflection",
     "kitchen": "kitchen",
 }
 
