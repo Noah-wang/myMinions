@@ -187,6 +187,21 @@ function markActivityNoticeSeen(key) {
   localStorage.setItem(SEEN_ACTIVITY_NOTICE_KEY, JSON.stringify(next));
 }
 
+function markActivityNoticeSeenRemote(key) {
+  if (!key) return;
+  fetch("/api/auto-report/seen", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ key }),
+    keepalive: true,
+  }).catch(() => {});
+}
+
+function markActivityNoticeSeenEverywhere(key) {
+  markActivityNoticeSeen(key);
+  markActivityNoticeSeenRemote(key);
+}
+
 function hideActivityNotice() {
   if (!activityNotice) return;
   activityNotice.hidden = true;
@@ -195,6 +210,7 @@ function hideActivityNotice() {
 
 function showActivityNotice(activity) {
   if (!activityNotice || !activity) return;
+  markActivityNoticeSeenEverywhere(activity.key);
   pendingActivityNotice = activity;
   activityNoticeTitle.textContent = activity.title || "完成一条运动";
   activityNoticeMeta.textContent = activity.meta || "可以生成 AI 训练解读";
@@ -786,14 +802,14 @@ flowToggle?.addEventListener("click", () => {
 });
 
 activityNoticeDismiss?.addEventListener("click", () => {
-  markActivityNoticeSeen(pendingActivityNotice?.key);
+  markActivityNoticeSeenEverywhere(pendingActivityNotice?.key);
   hideActivityNotice();
 });
 
 activityNoticeInterpret?.addEventListener("click", () => {
   const activity = pendingActivityNotice;
   if (!activity) return;
-  markActivityNoticeSeen(activity.key);
+  markActivityNoticeSeenEverywhere(activity.key);
   hideActivityNotice();
   startNewConversation();
   submitMessage(activity.prompt || "根据我最近一次 COROS 运动生成一份详细训练报告");

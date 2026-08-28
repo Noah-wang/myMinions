@@ -5,6 +5,7 @@ import os
 import re
 import sys
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -17,6 +18,7 @@ from agents.coros_report.activity_browser import summarize_activity
 from agents.coros_report.auto_report import activity_key, recent_coros_activities
 from src.runtime import ratelimit
 from src.runtime.flow_map import module_payload
+from src.runtime.memory import get_agent_cache, update_agent_cache
 from src.runtime.trace import log_event
 
 
@@ -37,6 +39,7 @@ WEB_COMMANDS = (
     "kitchen",
     "photo",
 )
+WEB_ACTIVITY_NOTICE_CACHE_KEY = "web_seen_activity_notices"
 
 
 @dataclass(frozen=True)
@@ -447,7 +450,7 @@ class WebHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path not in {"/api/chat", "/api/chat/stream"}:
+        if parsed.path not in {"/api/chat", "/api/chat/stream", "/api/auto-report/seen"}:
             self._send(*_json_response({"error": "未找到接口"}, HTTPStatus.NOT_FOUND))
             return
 
@@ -471,6 +474,16 @@ class WebHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length)
             data = json.loads(raw.decode("utf-8")) if raw else {}
+
+            if parsed.path == "/api/auto-report/seen":
+                key = str(data.get("key", "")).strip()
+                if not key:
+                    self._send(*_json_response({"error": "缺少运动记录 key"}, HTTPStatus.BAD_REQUEST))
+                    return
+                _mark_web_activity_notice_seen(key)
+                self._send(*_json_response({"ok": True, "key": key}))
+                return
+
             prompt = str(data.get("message", "")).strip()
             if not prompt:
                 self._send(*_json_response({"error": "请输入消息"}, HTTPStatus.BAD_REQUEST))
@@ -1395,12 +1408,51 @@ def _demo_auto_report_notice() -> dict[str, Any]:
     }
 
 
+def _web_seen_activity_notice_records() -> list[dict[str, str]]:
+    raw = get_agent_cache("coros-report").get(WEB_ACTIVITY_NOTICE_CACHE_KEY, [])
+    if not isinstance(raw, list):
+        return []
+
+    records: list[dict[str, str]] = []
+    for item in raw:
+        if isinstance(item, str) and item:
+            records.append({"key": item, "seen_at": ""})
+        elif isinstance(item, dict) and item.get("key"):
+            records.append(
+                {
+                    "key": str(item.get("key")),
+                    "seen_at": str(item.get("seen_at") or ""),
+                }
+            )
+    return records[-100:]
+
+
+def _web_seen_activity_notice_keys() -> set[str]:
+    return {item["key"] for item in _web_seen_activity_notice_records() if item.get("key")}
+
+
+def _mark_web_activity_notice_seen(key: str) -> None:
+    records = _web_seen_activity_notice_records()
+    if key not in {item["key"] for item in records}:
+        records.append(
+            {
+                "key": key,
+                "seen_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+    update_agent_cache("coros-report", {WEB_ACTIVITY_NOTICE_CACHE_KEY: records[-100:]})
+
+
 async def _auto_report_notice_payload() -> dict[str, Any]:
     if not _web_auto_report_enabled():
         return {"enabled": False, "pending": False}
 
     if _web_auto_report_demo_enabled():
-        return _demo_auto_report_notice()
+        notice = _demo_auto_report_notice()
+        key = notice.get("activity", {}).get("key")
+        if key in _web_seen_activity_notice_keys():
+            return {"enabled": True, "pending": False, "reason": "already_seen"}
+        return notice
 
     if _web_agent_mode() != "real":
         return {"enabled": True, "pending": False, "mode": "demo"}
@@ -1427,6 +1479,9 @@ async def _auto_report_notice_payload() -> dict[str, Any]:
     date_text = summary.get("date") or "日期未知"
     duration = summary.get("duration") or "时长未知"
     key = activity_key(activity)
+    if key in _web_seen_activity_notice_keys():
+        return {"enabled": True, "pending": False, "reason": "already_seen"}
+
     return {
         "enabled": True,
         "pending": True,
