@@ -62,11 +62,28 @@ class CommandContext:
     # Discord 只能发真实消息，一次问答冒出三四条会很吵，所以默认关。
     verbose_progress: bool = False
 
+    # 图片的直发通道。和 send 分开的理由比 notify 更强：
+    # 主 Agent 把命令包装成工具后，send 的内容是**喂给模型的**。
+    # 17 张图的 markdown 走这条路，等于让模型逐个复述 URL——
+    # 又费 token 又会漏，实测模型直接改成一句「已经全部加载出来了」，
+    # 用户一张图都看不到。
+    #
+    # **图片是给人看的数据，不该经过模型。** None 表示这个入口不支持，
+    # 能力层照常退回把图链接写进文本。
+    show_images: Any | None = None
+
     async def progress(self, text: str) -> None:
         """发一条进度提示。它不会进入工具返回值。"""
         if not text:
             return
         await (self.notify or self.send)(text)
+
+    def images(self, urls: list[str], caption: str = "") -> bool:
+        """把图片直接推给用户，绕过模型。不支持时返回 False。"""
+        if not urls or not callable(self.show_images):
+            return False
+        self.show_images(urls, caption)
+        return True
 
 
 @dataclass(frozen=True)
@@ -86,6 +103,14 @@ class TextCommand:
     # kitchen 一条命令下面既有 pantry 也有 bought，粗粒度的 writes 表达不了；
     # photo 和 running 则是在能力内部按 read_only 裁剪自己的动作。
     read_only_safe: bool = False
+    # 只读入口下改用这段描述。
+    #
+    # read_only_safe 的命令天生要在一段话里同时讲清读和写，结果是**读被写淹没**：
+    # photo 的描述原来以「保存、追加、补充信息」开头、末尾带一句
+    # 「这些只在 Discord 生效」，只读入口下模型把那句限制读成了整个工具的限制，
+    # 于是明知道该调 photo 也不调，改口说「我没有显示图片的能力」。
+    # 留空则两种入口共用 description。
+    read_only_description: str = ""
     # 参数格式说明，给模型看。留空就只用 description。
     # kitchen 这类子命令很多的能力必须写，否则模型只能猜参数长什么样。
     argument_hint: str = ""

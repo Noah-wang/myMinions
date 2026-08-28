@@ -4,7 +4,16 @@
     {
       "name": "agentdeck-web",
       "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "python", "-m", "src.api.web_server", "--host", "127.0.0.1", "--port", "8788"],
+      "runtimeArgs": [
+        "run",
+        "python",
+        "-m",
+        "src.api.web_server",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8788"
+      ],
       "port": 8788
     }
   ]

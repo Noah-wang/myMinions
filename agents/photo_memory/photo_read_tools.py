@@ -32,6 +32,17 @@ def list_races(limit: int = 50) -> dict[str, Any]:
     unnamed = len(races) - len(named)
 
     result: dict[str, Any] = {"race_count": len(named), "races": named}
+    # **张数不是图片。** 模型拿到 photo_count 之后会以为已经答完了，
+    # 于是「给我看照片」这类问题停在这里，一张图都不显示，
+    # 还反过来告诉用户「实际图片要你自己去照片库看」。
+    #
+    # 提示词管不住这件事——工具返回是更强的信号，所以写在数据里。
+    if any(race["photo_count"] for race in named):
+        result["images_included"] = False
+        result["next_step"] = (
+            "这里只有张数，没有图片本身。用户要看照片时，"
+            "必须再调用 photo 工具，它才会把原图显示出来。"
+        )
     # 只在真有未标注分组时才提。无条件写进 note 的话，模型会把这句说明
     # 当成事实，回答里凭空多出一组根本不存在的照片。
     if unnamed:
@@ -49,6 +60,7 @@ LIST_RACES_TOOL = Tool(
         "回答「跑过几场比赛」「参加过哪些马拉松」「上一场比赛成绩多少」"
         "这类问题时用它。注意：这是用户上传比赛照片时标注的比赛记录，"
         "和 COROS 的日常训练记录是两回事。"
+        "**它只返回张数，不返回图片本身**——用户要看照片时改用 photo 工具。"
     ),
     parameters={
         "type": "object",

@@ -140,7 +140,27 @@ async def _photo_read_only(context: CommandContext, argument: str) -> None:
         return
 
     _remember_photo_context(context, records)
-    lines = [format_photo_summary(records), ""]
+    summary = format_photo_summary(records)
+
+    all_urls: list[str] = []
+    for record in records:
+        all_urls.extend(photo_urls(record))
+
+    # 图片走直发通道。走 send 的话它们会变成工具返回值交给模型，
+    # 模型再复述一遍——实测的结果是它把 17 张图缩成一句
+    # 「已经全部加载出来了」，用户一张都看不到。
+    caption = "、".join(str(r.get("event", "照片")) for r in records)
+    if context.images(all_urls, caption):
+        # 必须告诉模型图已经发出去了，否则它会接着问「你确实参加过这场比赛吗」
+        await context.send(
+            f"{summary}\n\n"
+            f"（这 {len(all_urls)} 张照片已经直接显示在用户屏幕上了。"
+            "不要再说要去查找或需要更多信息，直接就着照片说话。）"
+        )
+        return
+
+    # 入口不支持直发（例如纯文本通道）时，退回把链接写进文本
+    lines = [summary, ""]
     for record in records:
         title = str(record.get("event", "照片"))
         urls = photo_urls(record)
@@ -329,6 +349,13 @@ def build_photo_capability() -> Capability:
                 # 保存和合并都会改数据，但能力内部按 read_only 走只读分支
                 writes=True,
                 read_only_safe=True,
+                # 只读入口下一个字都不提写操作：提了模型会以为整个工具不可用
+                read_only_description=(
+                    "按赛事检索比赛照片，并把原图直接显示给用户。"
+                    "用户说「给我看某某比赛的照片」「翻一下那场半马的图」时调它。"
+                    "**只有这个工具能返回图片本身**，list_races 只有张数。"
+                    "现在就可以调用，不需要任何额外权限"
+                ),
                 argument_hint="用户的原话，照片能力内部自己做意图识别",
             ),
         ),

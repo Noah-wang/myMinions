@@ -20,6 +20,7 @@ from typing import Any
 
 from src.integrations.web_search import SearchUnavailable, search_configured, search_web
 from src.runtime.conversation import append_turn, get_history
+from src.runtime.flow_map import MODULES, module_for
 from src.runtime.llm import complete_json
 from src.runtime.prompt import compose
 from src.runtime.tools import Tool, ToolRegistry, run_tool_loop
@@ -93,8 +94,9 @@ SEARCH_TOOL = Tool(
 OWNER_NAME = os.getenv("AGENT_OWNER_NAME", "用户").strip() or "用户"
 
 MAIN_AGENT_ROLE = f"""
-你是 {OWNER_NAME} 的个人助理，管着他记录下来的跑步训练数据。
-你能做的事完全由这一轮的工具表决定，不要承诺工具表以外的事。
+你是 {OWNER_NAME} 的个人助理。
+
+{{scope}}
 
 你有一组工具，分两类：查数据的，和执行动作的。想清楚该用哪个再调。
 
@@ -152,17 +154,39 @@ RACE_VS_TRAINING_RULE = """
 这两个是两回事。问「跑过几场比赛」要查 list_races，不是把训练记录倒一遍。
 """.strip()
 
+# 「你管着哪些东西」这句话必须从**实际装载的工具**推出来，不能写死。
+#
+# 写死过两次，两次都错在同一个地方：提示词里的自我描述和工具表对不上，
+# 而模型信前者。原来写死成「跑步训练、比赛照片和厨房」，抽开源版时改窄成
+# 「跑步训练数据」——于是线上问「给我看照片」，它回答「我没有看照片的功能」，
+# **尽管 photo 工具就在那一轮的工具表里**。
+#
+# 复用 flow_map 的模块映射：那张表已经被 flow_map_coverage 守着，
+# 每个工具都保证能映射到一个模块，所以这里不会漏掉新加的能力。
+SCOPE_MODULE_ORDER = ("races", "coros", "profile", "knowledge", "kitchen", "search")
+
+
+def _scope_paragraph(tool_names: set[str]) -> str:
+    """按这一轮的工具表列出「你能查什么」。"""
+    present = {module_for(name) for name in tool_names}
+    labels = [MODULES[key] for key in SCOPE_MODULE_ORDER if key in present]
+    if not labels:
+        return "你能做的事完全由这一轮的工具表决定，不要承诺工具表以外的事。"
+    return (
+        f"你现在能查的数据有：{'、'.join(labels)}。\n"
+        "用户问到这几类里的任何一类，先去调工具查，"
+        "**不要凭印象说自己没有这个功能**——你能做什么以工具表为准，不以这段话为准。\n"
+        "工具表里没有的，才如实说做不到。"
+    )
+
 
 def build_main_prompt(tool_names: set[str]) -> str:
     """按这一轮实际有哪些工具拼系统提示。"""
-    parts = [MAIN_AGENT_ROLE]
+    parts = [MAIN_AGENT_ROLE.format(scope=_scope_paragraph(tool_names))]
     if "list_races" in tool_names:
         parts.append(RACE_VS_TRAINING_RULE)
     parts.append(UNTRUSTED_CONTENT_RULE)
     return compose(*parts)
-
-
-MAIN_AGENT_PROMPT = compose(MAIN_AGENT_ROLE, RACE_VS_TRAINING_RULE, UNTRUSTED_CONTENT_RULE)
 
 
 REFLECTION_SYSTEM_PROMPT = """

@@ -33,6 +33,10 @@
     "flow_map_coverage": {
       "threshold": 1.0,
       "description": "暴露给模型的工具全部能映射到架构图模块；漏一个图就会说谎"
+    },
+    "prompt_scope_correctness": {
+      "threshold": 1.0,
+      "description": "系统提示里的能力描述和实际工具表一致；脱节时模型会照着提示词说自己做不到"
     }
   },
   "constraints": [

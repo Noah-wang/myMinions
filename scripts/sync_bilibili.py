@@ -166,9 +166,12 @@ async def get_video_list(uid: int, force_refresh: bool) -> tuple[list[dict], str
     try:
         videos = await list_user_videos(uid)
     except Exception as exc:
+        # 截到 40 字会把最有用的部分砍掉：新用户第一次跑最常见的错误是
+        # 「Bilibili config not found: <路径>」，而路径正好从第 40 个字开始。
+        message = str(exc)[:160]
         if cached:
-            return cached, f"请求失败退回缓存（{str(exc)[:40]}）"
-        return [], f"请求失败且无缓存（{str(exc)[:40]}）"
+            return cached, f"请求失败退回缓存（{message}）"
+        return [], f"请求失败且无缓存（{message}）"
 
     if not videos:
         if cached:

@@ -9,7 +9,8 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT_DIR))
 
 from src.orchestrator import MainAgentOrchestrator
-from src.runtime.flow_map import MODULES, TOOL_MODULES  # noqa: E402
+from src.ask import build_main_prompt
+from src.runtime.flow_map import MODULES, TOOL_MODULES, module_for  # noqa: E402
 
 
 RUNNING_CHANNEL_ID = "111"
@@ -94,10 +95,53 @@ def judge_flow_map(
     )
 
 
+def judge_prompt_scope(
+    orchestrator: MainAgentOrchestrator,
+    case: dict[str, Any],
+) -> CaseResult:
+    """系统提示里的「你能查什么」必须和实际工具表一致。
+
+    真实回归：为了给开源版剥离厨房和照片，角色提示词被改窄成
+    「管着他记录下来的跑步训练数据」。工具表没变，`photo` 还在里面，
+    但模型照着自我描述回答「我没有看照片的功能」。
+
+    **提示词里的自我描述和工具表对不上时，模型信前者。**
+    所以这条守的不是措辞，是「两者不能脱节」这个契约。
+    """
+    tools = orchestrator._loop_tools(
+        None,
+        _FakeChannel(_channel_id(case["channel"])),
+        read_only=case.get("read_only", False),
+    )
+    names = {tool.name for tool in tools}
+    prompt = build_main_prompt(names)
+
+    expected_labels = sorted(
+        {MODULES[module_for(name)] for name in names} & set(MODULES.values())
+    )
+    # 只检查数据类模块：entry/loop/answer 不是「能查的东西」
+    expected_labels = [
+        label for label in expected_labels
+        if label not in {MODULES["entry"], MODULES["loop"], MODULES["answer"]}
+    ]
+    missing = [label for label in expected_labels if label not in prompt]
+
+    return CaseResult(
+        case_id=case["id"],
+        passed=not missing,
+        tags=("prompt_scope",),
+        expected={"mentioned": expected_labels},
+        actual={"missing": missing},
+    )
+
+
 def judge_case(
     orchestrator: MainAgentOrchestrator,
     case: dict[str, Any],
 ) -> CaseResult:
+    if case.get("kind") == "prompt_scope":
+        return judge_prompt_scope(orchestrator, case)
+
     if case.get("kind") == "flow_map":
         return judge_flow_map(orchestrator, case)
 
@@ -156,6 +200,7 @@ def score_results(results: list[CaseResult]) -> dict[str, float]:
     return {
         "loop_tool_exposure": _tag_score(results, "loop_tools"),
         "flow_map_coverage": _tag_score(results, "flow_map"),
+        "prompt_scope_correctness": _tag_score(results, "prompt_scope"),
         "route_accuracy": _tag_score(results, "positive"),
         "rejection_accuracy": _tag_score(results, "negative"),
         "cross_channel_rejection": _tag_score(results, "cross_channel"),

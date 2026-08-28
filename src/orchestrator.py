@@ -1124,6 +1124,9 @@ User message:
                 send=capture,
                 send_chunks=capture,
                 notify=notify,
+                # 图片绕过工具缓冲区直发给用户。入口不支持就是 None，
+                # 能力层会退回把链接写进文本。
+                show_images=getattr(channel, "show_images", None),
                 message=message,
                 conversation_id=self._conversation_id(channel),
                 read_only=read_only,
@@ -1133,6 +1136,8 @@ User message:
             return "\n\n".join(buffer) or f"{command.name} 执行完成，没有输出。"
 
         description = command.description
+        if read_only and command.read_only_description:
+            description = command.read_only_description
         if command.argument_hint:
             description = f"{description}。参数：{command.argument_hint}"
 
@@ -1432,6 +1437,7 @@ User message:
             send=send_text,
             send_chunks=send_chunks,
             notify=getattr(channel, "notify", None) or send_text,
+            show_images=getattr(channel, "show_images", None),
             verbose_progress=bool(getattr(channel, "verbose_progress", False)),
             message=message,
             conversation_id=self._conversation_id(channel),

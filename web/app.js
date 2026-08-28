@@ -14,9 +14,15 @@ const flowToggle = document.querySelector("#flowToggle");
 const flowNodes = document.querySelectorAll("#flowMap .flow-node");
 const flowEdges = document.querySelectorAll("#flowMap .flow-edge");
 const flowHint = document.querySelector("#flowHint");
+const activityNotice = document.querySelector("#activityNotice");
+const activityNoticeTitle = document.querySelector("#activityNoticeTitle");
+const activityNoticeMeta = document.querySelector("#activityNoticeMeta");
+const activityNoticeDismiss = document.querySelector("#activityNoticeDismiss");
+const activityNoticeInterpret = document.querySelector("#activityNoticeInterpret");
 
 const ACTIVE_SESSION_KEY = "agentdeck-active-session";
 const CONVERSATIONS_KEY = "agentdeck-conversations-v2";
+const SEEN_ACTIVITY_NOTICE_KEY = "agentdeck-seen-activity-notices-v1";
 const FALLBACK_ACTIONS = [
   { title: "查最近 90 天运动记录", prompt: "列出我最近 90 天的运动记录" },
   { title: "查最近一次训练报告", prompt: "我今天这次训练怎么样？下一次应该怎么练？" },
@@ -36,6 +42,9 @@ let contextualActions = null;
 let flowQueue = [];
 let flowPlaying = false;
 let lastFlowModule = null;
+let pendingActivityNotice = null;
+let activeStreamBubble = null;
+let activeStreamText = "";
 
 function setFlowExpanded(expanded) {
   if (!flowDrawer || !flowToggle) return;
@@ -163,6 +172,51 @@ function switchConversation(id) {
   input.focus();
 }
 
+function seenActivityNotices() {
+  try {
+    const value = JSON.parse(localStorage.getItem(SEEN_ACTIVITY_NOTICE_KEY) || "[]");
+    return Array.isArray(value) ? value.filter(Boolean).slice(-30) : [];
+  } catch {
+    return [];
+  }
+}
+
+function markActivityNoticeSeen(key) {
+  if (!key) return;
+  const next = [...new Set([...seenActivityNotices(), key])].slice(-30);
+  localStorage.setItem(SEEN_ACTIVITY_NOTICE_KEY, JSON.stringify(next));
+}
+
+function hideActivityNotice() {
+  if (!activityNotice) return;
+  activityNotice.hidden = true;
+  pendingActivityNotice = null;
+}
+
+function showActivityNotice(activity) {
+  if (!activityNotice || !activity) return;
+  pendingActivityNotice = activity;
+  activityNoticeTitle.textContent = activity.title || "完成一条运动";
+  activityNoticeMeta.textContent = activity.meta || "可以生成 AI 训练解读";
+  activityNotice.hidden = false;
+}
+
+async function checkActivityNotice() {
+  if (!activityNotice || document.hidden) return;
+  try {
+    const response = await fetch("/api/auto-report/latest");
+    if (!response.ok) return;
+    const payload = await response.json();
+    const activity = payload.activity;
+    if (!payload.pending || !activity?.key || seenActivityNotices().includes(activity.key)) {
+      return;
+    }
+    showActivityNotice(activity);
+  } catch {
+    // 弹窗只是提示层，COROS 暂时不可用时不能影响正常对话。
+  }
+}
+
 function renderConversationList() {
   const conversations = loadConversations();
   conversationListEl.replaceChildren();
@@ -224,6 +278,43 @@ function appendMessage(kind, text, options = {}) {
   if (persist) appendStoredMessage(kind, text);
   scrollToBottom();
   return bubble;
+}
+
+// 图片走独立的 images 事件，不经过模型也不进 markdown 渲染。
+// 直接建 <img>，src 来自后端给的 /media/photo-memory/ 路径。
+function appendImages(urls, caption) {
+  if (!Array.isArray(urls) || !urls.length) return;
+  hideWelcome();
+  const article = document.createElement("article");
+  article.className = "message agent-message";
+
+  const bubble = document.createElement("div");
+  bubble.className = "bubble photo-bubble";
+  if (caption) {
+    const title = document.createElement("p");
+    title.className = "photo-caption";
+    title.textContent = `${caption} · ${urls.length} 张`;
+    bubble.appendChild(title);
+  }
+
+  const grid = document.createElement("div");
+  grid.className = "photo-grid";
+  for (const url of urls) {
+    const link = document.createElement("a");
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    const img = document.createElement("img");
+    img.src = url;
+    img.loading = "lazy";
+    img.alt = caption || "比赛照片";
+    link.appendChild(img);
+    grid.appendChild(link);
+  }
+  bubble.appendChild(grid);
+  article.appendChild(bubble);
+  chatLog.appendChild(article);
+  scrollToBottom();
 }
 
 function flowReset() {
@@ -357,6 +448,42 @@ async function streamText(bubble, text) {
   bubble.innerHTML = renderMarkdown(text);
 }
 
+function renderActiveStream() {
+  if (!activeStreamBubble) return;
+  const stick = atBottom();
+  activeStreamBubble.innerHTML = renderMarkdown(activeStreamText);
+  const cursor = document.createElement("span");
+  cursor.className = "cursor";
+  (activeStreamBubble.lastElementChild || activeStreamBubble).appendChild(cursor);
+  if (stick) scrollToBottom();
+}
+
+function startAgentStream() {
+  hideThinking();
+  if (activeStreamBubble) return;
+  activeStreamText = "";
+  activeStreamBubble = appendMessage("agent", "", { persist: false });
+  renderActiveStream();
+}
+
+function appendAgentStream(delta) {
+  if (!delta) return;
+  if (!activeStreamBubble) startAgentStream();
+  activeStreamText += delta;
+  renderActiveStream();
+}
+
+function finishAgentStream(message = "") {
+  if (!activeStreamBubble) return;
+  const finalText = message || activeStreamText;
+  activeStreamBubble.innerHTML = renderMarkdown(finalText);
+  appendStoredMessage("agent", finalText);
+  updateContextualSuggestions("", finalText);
+  activeStreamBubble = null;
+  activeStreamText = "";
+  scrollToBottom();
+}
+
 function parseSseEvents(buffer) {
   const events = [];
   let remaining = buffer;
@@ -409,25 +536,38 @@ async function streamChat(message) {
 
     for (const event of parsed.events) {
       if (event.type === "done") {
+        finishAgentStream();
         await reader.cancel().catch(() => {});
         return;
       }
-      if (event.type === "message") {
+      if (event.type === "message_start") {
+        startAgentStream();
+      } else if (event.type === "message_delta") {
+        appendAgentStream(event.delta || "");
+      } else if (event.type === "message_end") {
+        finishAgentStream(event.message || "");
+      } else if (event.type === "message") {
         const text = event.message || "";
         if (!text.trim()) continue;
         if (isProgressNotice(text)) {
           showThinking(text);
           continue;
         }
+        finishAgentStream();
         hideThinking();
         await streamText(appendMessage("agent", "", { persist: false }), text);
         appendStoredMessage("agent", text);
         updateContextualSuggestions("", text);
+      } else if (event.type === "images") {
+        finishAgentStream();
+        hideThinking();
+        appendImages(event.urls, event.caption || "");
       } else if (event.type === "trace_step") {
         flowStep(event.module, event.why || event.label || "");
       } else if (event.type === "status") {
         showThinking(event.message || "思考中");
       } else if (event.type === "error") {
+        finishAgentStream();
         hideThinking();
         appendMessage("error", `出错了：${event.error || "未知错误"}`);
       }
@@ -645,6 +785,20 @@ flowToggle?.addEventListener("click", () => {
   setFlowExpanded(!expanded);
 });
 
+activityNoticeDismiss?.addEventListener("click", () => {
+  markActivityNoticeSeen(pendingActivityNotice?.key);
+  hideActivityNotice();
+});
+
+activityNoticeInterpret?.addEventListener("click", () => {
+  const activity = pendingActivityNotice;
+  if (!activity) return;
+  markActivityNoticeSeen(activity.key);
+  hideActivityNotice();
+  startNewConversation();
+  submitMessage(activity.prompt || "根据我最近一次 COROS 运动生成一份详细训练报告");
+});
+
 function boot() {
   let conversations = loadConversations();
   if (conversations.length) {
@@ -664,6 +818,8 @@ function boot() {
   updateSuggestionsFromConversation();
   const prompt = new URLSearchParams(window.location.search).get("prompt");
   if (prompt) fillComposer(prompt);
+  window.setTimeout(checkActivityNotice, 1200);
+  window.setInterval(checkActivityNotice, 5 * 60 * 1000);
   input.focus();
 }
 

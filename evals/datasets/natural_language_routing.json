@@ -438,5 +438,19 @@
     "channel": "running",
     "read_only": true,
     "note": "网页只读入口同上——前端那张图画的就是这个入口"
+  },
+  {
+    "id": "prompt_scope_running_readwrite",
+    "kind": "prompt_scope",
+    "channel": "running",
+    "read_only": false,
+    "note": "Discord 跑步频道：提示词要提到工具表覆盖的每一类数据"
+  },
+  {
+    "id": "prompt_scope_running_readonly",
+    "kind": "prompt_scope",
+    "channel": "running",
+    "read_only": true,
+    "note": "真实回归：网页入口有 photo 工具，模型却说自己没有看照片的功能"
   }
 ]

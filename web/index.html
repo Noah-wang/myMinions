@@ -176,6 +176,21 @@
       </section>
     </main>
 
+    <section class="activity-notice" id="activityNotice" hidden aria-live="polite">
+      <div class="activity-notice-card" role="dialog" aria-modal="false" aria-labelledby="activityNoticeTitle">
+        <button type="button" class="notice-close" id="activityNoticeDismiss" aria-label="关闭运动提醒">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor"
+                  stroke-width="2.2" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <p class="notice-eyebrow">检测到新运动</p>
+        <h2 id="activityNoticeTitle">完成一条运动</h2>
+        <p id="activityNoticeMeta">可以生成 AI 训练解读</p>
+        <button type="button" class="notice-primary" id="activityNoticeInterpret">解读</button>
+      </div>
+    </section>
+
     <script src="/app.js" type="module"></script>
   </body>
 </html>

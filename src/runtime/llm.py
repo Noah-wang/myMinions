@@ -123,4 +123,17 @@ async def complete_json(system_prompt: str, user_prompt: str) -> dict[str, Any]:
     content = response.choices[0].message.content
     if not content:
         raise RuntimeError("DeepSeek returned an empty JSON response.")
-    return json.loads(content)
+
+    # 只取第一个 JSON 对象，忽略后面多出来的内容。
+    #
+    # 即使指定了 response_format=json_object，模型偶尔仍会把两个对象拼在一起
+    # 返回，`json.loads` 直接抛 "Extra data: line 3 column 1"。
+    # 实测踩过：照片意图识别间歇性失败，静默降级成关键词兜底——
+    # **不报错、只是变笨**，所以很难发现。
+    try:
+        parsed, _ = json.JSONDecoder().raw_decode(content.strip())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"模型返回的不是合法 JSON：{content[:120]}") from exc
+    if not isinstance(parsed, dict):
+        raise RuntimeError(f"模型返回的 JSON 不是对象：{content[:120]}")
+    return parsed

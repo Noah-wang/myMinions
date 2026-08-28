@@ -13,6 +13,8 @@ from urllib.parse import quote, unquote, urlparse
 
 from dotenv import load_dotenv
 
+from agents.coros_report.activity_browser import summarize_activity
+from agents.coros_report.auto_report import activity_key, recent_coros_activities
 from src.runtime import ratelimit
 from src.runtime.flow_map import module_payload
 from src.runtime.trace import log_event
@@ -410,6 +412,12 @@ class WebHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/data":
             self._send(*_json_response(_data_payload()), include_body=include_body)
+            return
+        if parsed.path == "/api/auto-report/latest":
+            self._send(
+                *_json_response(asyncio.run(_auto_report_notice_payload())),
+                include_body=include_body,
+            )
             return
         if parsed.path == "/data":
             self._serve_static("/data.html", include_body=include_body)
@@ -1344,6 +1352,97 @@ def _data_kitchen_section() -> dict[str, Any]:
     }
 
 
+def _web_auto_report_enabled() -> bool:
+    return os.getenv("WEB_AUTO_REPORT_NOTICE_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _web_auto_report_demo_enabled() -> bool:
+    return os.getenv("WEB_AUTO_REPORT_NOTICE_DEMO", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _auto_report_timeout_seconds() -> int:
+    raw_value = os.getenv("WEB_AUTO_REPORT_NOTICE_TIMEOUT_SECONDS", "20")
+    try:
+        return max(int(raw_value), 5)
+    except ValueError:
+        return 20
+
+
+def _demo_auto_report_notice() -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "pending": True,
+        "activity": {
+            "key": "demo-activity-2026-08-20",
+            "title": "完成 10.00 km · 室内跑",
+            "meta": "2026-08-20 · 1:18 · 可以生成 AI 训练解读",
+            "sport": "室内跑",
+            "distance": "10.00 km",
+            "duration": "1:18",
+            "date": "2026-08-20",
+            "prompt": "根据我最近一次 COROS 运动生成一份详细训练报告，使用黑影 workout review 风格。",
+        },
+    }
+
+
+async def _auto_report_notice_payload() -> dict[str, Any]:
+    if not _web_auto_report_enabled():
+        return {"enabled": False, "pending": False}
+
+    if _web_auto_report_demo_enabled():
+        return _demo_auto_report_notice()
+
+    if _web_agent_mode() != "real":
+        return {"enabled": True, "pending": False, "mode": "demo"}
+
+    try:
+        records = await asyncio.wait_for(
+            recent_coros_activities(),
+            timeout=_auto_report_timeout_seconds(),
+        )
+    except Exception as exc:
+        return {
+            "enabled": True,
+            "pending": False,
+            "error": str(exc) or exc.__class__.__name__,
+        }
+
+    if not records:
+        return {"enabled": True, "pending": False}
+
+    activity = records[0]
+    summary = summarize_activity(activity)
+    distance = summary.get("distance") or "距离未知"
+    sport = summary.get("type") or "运动"
+    date_text = summary.get("date") or "日期未知"
+    duration = summary.get("duration") or "时长未知"
+    key = activity_key(activity)
+    return {
+        "enabled": True,
+        "pending": True,
+        "activity": {
+            "key": key,
+            "title": f"完成 {distance} · {sport}",
+            "meta": f"{date_text} · {duration} · 可以生成 AI 训练解读",
+            "sport": sport,
+            "distance": distance,
+            "duration": duration,
+            "date": date_text,
+            "prompt": "根据我最近一次 COROS 运动生成一份详细训练报告，使用黑影 workout review 风格。",
+        },
+    }
+
+
 def _json_count(path: Path) -> int:
     data = _read_json(path, [])
     if isinstance(data, list):
@@ -1412,15 +1511,43 @@ class WebChannel:
 
     async def send(self, content: str) -> None:
         self.messages.append(content)
-        self._emit({"type": "message", "message": content})
+        await self._emit_message_stream(content)
 
     async def notify(self, content: str) -> None:
         """进度提示。走 status 事件，前端显示在「思考中」那一行，不落进对话。"""
         self._emit({"type": "status", "message": content})
 
+    def show_images(self, urls: list[str], caption: str = "") -> None:
+        """图片直发。不经过模型，所以不会被复述成一句「已经加载出来了」。"""
+        self._emit({"type": "images", "urls": list(urls), "caption": caption})
+
     def trace_step(self, payload: dict[str, Any]) -> None:
         """把一次工具调用映射成的架构模块推给前端，用来在架构图上高亮。"""
         self._emit(payload)
+
+    async def _emit_message_stream(self, content: str) -> None:
+        self._emit({"type": "message_start"})
+        for chunk in _text_stream_chunks(content):
+            self._emit({"type": "message_delta", "delta": chunk})
+            await asyncio.sleep(0.012)
+        self._emit({"type": "message_end", "message": content})
+
+
+def _text_stream_chunks(text: str, size: int = 72) -> list[str]:
+    if len(text) <= size:
+        return [text]
+
+    chunks: list[str] = []
+    current = ""
+    for token in re.split(r"(\s+)", text):
+        if len(current) + len(token) > size and current:
+            chunks.append(current)
+            current = token
+        else:
+            current += token
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def _ensure_agent_paths() -> None:
@@ -1526,12 +1653,27 @@ async def _stream_real_chat(
 
     channel = WebChannel(emit, conversation_id)
     emit({"type": "status", "message": "正在调用真实 Agent..."})
-    route = await get_orchestrator().dispatch_web_text(
-        None,
-        channel,
-        prompt,
-        WEB_COMMANDS,
+    task = asyncio.create_task(
+        get_orchestrator().dispatch_web_text(
+            None,
+            channel,
+            prompt,
+            WEB_COMMANDS,
+        )
     )
+    messages = (
+        "正在读取需要的数据...",
+        "正在等待工具返回...",
+        "正在整理上下文...",
+        "正在生成回答...",
+    )
+    index = 0
+    while not task.done():
+        await asyncio.sleep(2.5)
+        if not task.done():
+            emit({"type": "status", "message": messages[index % len(messages)]})
+            index += 1
+    route = await task
     emit({"type": "trace", "result": _route_result_payload(route)})
 
 
@@ -1540,12 +1682,19 @@ async def _collect_real_chat(
     conversation_id: str = "web:default",
 ) -> dict[str, Any]:
     messages: list[str] = []
+    saw_delta = False
 
     def emit(payload: dict[str, Any]) -> None:
+        nonlocal saw_delta
         if payload.get("type") == "message":
             message = payload.get("message")
             if isinstance(message, str):
                 messages.append(message)
+        elif payload.get("type") == "message_delta":
+            delta = payload.get("delta")
+            if isinstance(delta, str):
+                saw_delta = True
+                messages.append(delta)
 
     _ensure_agent_paths()
     from src.orchestrator import get_orchestrator
@@ -1558,7 +1707,7 @@ async def _collect_real_chat(
         WEB_COMMANDS,
     )
     result = _route_result_payload(route)
-    result["message"] = "\n\n".join(messages)
+    result["message"] = "".join(messages) if saw_delta else "\n\n".join(messages)
     return result
 
 
