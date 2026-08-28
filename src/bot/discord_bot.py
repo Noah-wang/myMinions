@@ -163,6 +163,16 @@ def create_discord_client() -> discord.Client:
             "正在读取 COROS 自动 PB。",
         )
 
+    @tree.command(name="coros-sleep-report", description="生成 COROS 睡眠与恢复晨报")
+    async def coros_sleep_report_command(interaction: discord.Interaction) -> None:
+        await _dispatch_interaction_command(
+            interaction,
+            client,
+            "coros-sleep-report",
+            "",
+            "正在生成 COROS 睡眠与恢复晨报。",
+        )
+
     # 跑步书籍回答命令
     @tree.command(name="running-ask", description="基于已导入跑步书籍回答训练问题")
     @app_commands.describe(question="你的跑步训练问题")

@@ -12,3 +12,5 @@ data/media/
 data/coros-report/
 data/conversations/
 **/.secrets/
+
+.playwright-cli/

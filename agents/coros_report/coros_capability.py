@@ -3,6 +3,7 @@ import discord
 from agents.coros_report.agent import list_available_coros_tools
 from agents.coros_report.graph import generate_coros_graph_report
 from agents.coros_report.auto_report import check_and_send_coros_auto_report, latest_coros_activity, register_coros_auto_report
+from agents.coros_report.sleep_report import check_and_send_coros_sleep_report, register_coros_sleep_report
 from agents.coros_report.activity_browser import (
     generate_selected_activity_report_for_conversation,
     list_activity_records,
@@ -204,6 +205,16 @@ async def _auto_report(context: CommandContext, _: str) -> None:
         await context.send(result)
 
 
+async def _sleep_report(context: CommandContext, _: str) -> None:
+    await context.progress("正在生成 COROS 睡眠与恢复晨报...")
+    result = await check_and_send_coros_sleep_report(
+        context.client,
+        force_send=True,
+    )
+    if result.startswith("COROS sleep report") and not result.endswith("sent."):
+        await context.send(result)
+
+
 def build_coros_capability() -> Capability:
     return Capability(
         name="coros-report",
@@ -315,6 +326,14 @@ def build_coros_capability() -> Capability:
                 writes=True,
                 expose_as_tool=False,
             ),
+            TextCommand(
+                "coros-sleep-report",
+                "生成 COROS 睡眠与恢复晨报",
+                _sleep_report,
+                aliases=("sleep-report",),
+                writes=True,
+                expose_as_tool=False,
+            ),
         ),
-        startup_handlers=(register_coros_auto_report,),
+        startup_handlers=(register_coros_auto_report, register_coros_sleep_report),
     )
