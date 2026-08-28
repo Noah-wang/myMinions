@@ -398,7 +398,7 @@ class WebHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/capabilities":
             # 只暴露给前端做空状态提示的示例问题，不再对外列出内部能力名和命令。
             payload = {
-                "project": "AgentDeck",
+                "project": "COROS Agent",
                 "sample_prompts": SAMPLE_PROMPTS,
                 "sample_actions": SAMPLE_ACTIONS,
             }
@@ -1715,12 +1715,12 @@ def run(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
     load_dotenv(ROOT_DIR / ".env")
     _ensure_agent_paths()
     httpd = ThreadingHTTPServer((host, port), WebHandler)
-    print(f"AgentDeck 智能体控制台运行中：http://{host}:{port}", flush=True)
+    print(f"COROS Agent 控制台运行中：http://{host}:{port}", flush=True)
     httpd.serve_forever()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="运行 AgentDeck 智能体控制台。")
+    parser = argparse.ArgumentParser(description="运行 COROS Agent 控制台。")
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = parser.parse_args()

@@ -20,7 +20,7 @@
   </defs>
 
   <rect width="1180" height="880" fill="#ffffff"/>
-  <text class="title" x="48" y="56">AgentDeck 架构图</text>
+  <text class="title" x="48" y="56">COROS Agent 架构图</text>
   <text class="sub" x="48" y="84">个人多能力 Agent 运行时。自然语言进主 Agent 循环，显式命令走快速通道。</text>
 
   <text class="zone" x="48" y="132">入口层</text>

@@ -255,7 +255,7 @@ async function boot() {
     dataBoard.innerHTML = `
       <section class="empty-state">
         <h4>数据暂时不可用</h4>
-        <p>后端没有返回数据，请确认 AgentDeck 服务正在运行。</p>
+        <p>后端没有返回数据，请确认 COROS Agent 服务正在运行。</p>
       </section>
     `;
   }
