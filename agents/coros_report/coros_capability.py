@@ -3,6 +3,7 @@ import discord
 from agents.coros_report.agent import list_available_coros_tools
 from agents.coros_report.graph import generate_coros_graph_report
 from agents.coros_report.auto_report import check_and_send_coros_auto_report, latest_coros_activity, register_coros_auto_report
+from agents.coros_report.sleep_read_tools import SLEEP_READ_TOOLS
 from agents.coros_report.sleep_report import check_and_send_coros_sleep_report, register_coros_sleep_report
 from agents.coros_report.activity_browser import (
     generate_selected_activity_report_for_conversation,
@@ -220,7 +221,7 @@ def build_coros_capability() -> Capability:
         name="coros-report",
         description="读取 COROS 运动数据，生成训练报告，回答跑步问题，并记录主观感受。",
         channel_env_name="DISCORD_RUNNING_CHANNEL_ID",
-        read_tools=COROS_READ_TOOLS,
+        read_tools=(*COROS_READ_TOOLS, *SLEEP_READ_TOOLS),
         text_commands=(
             TextCommand(
                 "coros",

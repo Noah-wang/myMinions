@@ -202,17 +202,26 @@ async def _call_coros_with_fallbacks(tool_name: str, day: date) -> dict[str, Any
     }
 
 
+# 五个 COROS 工具**互不依赖**，并行取。
+#
+# 原来是串行 for 循环，单次上限 75 秒，最坏情况 375 秒。定时任务能等，
+# 但包成 Agent 工具之后循环只给 75 秒——串行版本必然超时。
+# 并行之后墙钟时间回到「最慢的那一个」。
+SLEEP_TOOL_NAMES = (
+    "querySleepData",
+    "querySleepHrv",
+    "queryDailyHealthData",
+    "queryRecoveryStatus",
+    "queryTrainingLoadAssessment",
+)
+
+
 async def _collect_sleep_tool_results(day: date) -> list[dict[str, Any]]:
-    results = []
-    for tool_name in (
-        "querySleepData",
-        "querySleepHrv",
-        "queryDailyHealthData",
-        "queryRecoveryStatus",
-        "queryTrainingLoadAssessment",
-    ):
-        results.append(await _call_coros_with_fallbacks(tool_name, day))
-    return results
+    return list(
+        await asyncio.gather(
+            *(_call_coros_with_fallbacks(name, day) for name in SLEEP_TOOL_NAMES)
+        )
+    )
 
 
 def _contains_sleep_signal(value: Any) -> bool:

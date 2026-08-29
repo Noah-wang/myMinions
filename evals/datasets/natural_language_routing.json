@@ -390,9 +390,10 @@
       "feel",
       "feelings",
       "photo",
-      "knowledge-source"
+      "knowledge-source",
+      "get_sleep_report"
     ],
-    "note": "Discord 跑步频道拿到全部工具；coros-tools 和两个 auto 命令是运维用的，不暴露。knowledge-source 是写工具，只应出现在这里"
+    "note": "Discord 跑步频道拿到全部工具；coros-tools 和两个 auto 命令是运维用的，不暴露。knowledge-source 是写工具，只应出现在这里 get_sleep_report 是睡眠数据的唯一来源，读工具，两个入口都该有。"
   },
   {
     "id": "loop_tools_running_readonly",
@@ -411,9 +412,10 @@
       "coros-pb",
       "running",
       "feelings",
-      "photo"
+      "photo",
+      "get_sleep_report"
     ],
-    "note": "公开网页入口：写工具必须根本看不见。模型看不见的工具不可能调用"
+    "note": "公开网页入口：写工具必须根本看不见。模型看不见的工具不可能调用 get_sleep_report 是睡眠数据的唯一来源，读工具，两个入口都该有。"
   },
   {
     "id": "loop_tools_cooking_isolated",
