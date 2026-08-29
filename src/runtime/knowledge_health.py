@@ -96,13 +96,26 @@ def inspect_knowledge_index(source: str | None = None) -> dict[str, Any]:
 
     if EMBEDDINGS_PATH.exists():
         payload = json.loads(EMBEDDINGS_PATH.read_text(encoding="utf-8"))
-        vector_ids = {item["id"] for item in payload.get("items", [])}
-        missing = [c["id"] for c in chunks if c["id"] not in vector_ids]
+        # **向量是按子块存的，块是父块。** 直接比 id 相等永远对不上：
+        # 父块 id 是 "书.pdf:p3:c1"，子块 id 是 "书.pdf:p3:c1:s1"。
+        # 原来那样写会把 222 个块全报成「缺向量」——而检索其实一切正常。
+        # 一个用来体检的工具谎报「全坏了」，比不体检更糟。
+        # 用条目自带的 parent_id，不要去切 id 字符串——
+        # id 的命名规则一旦改，靠切分的判断会**静默**失效。
+        items = payload.get("items", [])
+        covered = {
+            item.get("parent_id") or str(item.get("id", "")).rsplit(":s", 1)[0]
+            for item in items
+        }
+        missing = [c["id"] for c in chunks if c["id"] not in covered]
         report["向量"] = {
             "模型": payload.get("model"),
-            "总数": len(payload.get("items", [])),
-            "缺向量的块": len(missing),
+            "子块向量总数": len(items),
+            "有向量的父块": len(chunks) - len(missing),
+            "缺向量的父块": len(missing),
         }
+        if missing:
+            report["向量"]["缺向量的样例"] = missing[:3]
     else:
         report["向量"] = {"状态": "没有 embeddings.json，只能走关键词检索"}
 
