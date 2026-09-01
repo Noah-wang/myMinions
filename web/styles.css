@@ -1752,3 +1752,27 @@ button {
 .photo-grid a:hover img {
   transform: scale(1.05);
 }
+
+/* 公开设置页只展示状态，不渲染开关或编辑器。 */
+.settings-page { min-height: 100%; overflow-y: auto; }
+.settings-shell { width: min(880px, calc(100% - 40px)); margin: 0 auto; padding: 56px 0 96px; }
+.settings-head { padding-bottom: 28px; border-bottom: 1.5px solid rgba(34,38,47,.18); }
+.settings-head h2 { margin: 5px 0 9px; font-size: clamp(28px, 5vw, 44px); letter-spacing: 0; }
+.settings-head > p:last-child { max-width: 620px; margin: 0; color: var(--muted); line-height: 1.65; }
+.readonly-notice { display: flex; align-items: center; gap: 12px; margin-top: 24px; padding: 12px 14px; border-left: 4px solid var(--blue); background: rgba(31,94,255,.06); }
+.readonly-notice span { color: var(--muted); font-size: 13px; }
+.settings-band { padding: 30px 0; border-bottom: 1.5px solid rgba(34,38,47,.18); }
+.settings-band h3 { margin: 4px 0 16px; font-size: 22px; }
+.readonly-setting-row { min-height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border-top: 1px solid rgba(34,38,47,.12); }
+.readonly-setting-row div { display: flex; flex-direction: column; gap: 5px; }
+.readonly-setting-row small { color: var(--muted); line-height: 1.45; }
+.readonly-setting-row > span { flex: none; padding: 5px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.status-on { color: #146c43; background: rgba(20,108,67,.1); }
+.status-off { color: #7a4750; background: rgba(122,71,80,.1); }
+#settingsError { color: #b42318; }
+@media (max-width: 680px) {
+  .settings-shell { width: min(100% - 28px, 880px); padding-top: 34px; }
+  .topbar { padding-inline: 14px; overflow-x: auto; }
+  .brand h1 { display: none; }
+  .readonly-notice { align-items: flex-start; flex-direction: column; }
+}

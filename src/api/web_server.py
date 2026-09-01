@@ -16,6 +16,8 @@ from dotenv import load_dotenv
 
 from agents.coros_report.activity_browser import summarize_activity
 from agents.coros_report.auto_report import activity_key, recent_coros_activities
+from agents.coros_report.shadowrunner_prompt import REPORT_SYSTEM_PROMPT
+from agents.coros_report.sleep_report_prompt import SLEEP_REPORT_SYSTEM_PROMPT
 from src.runtime import ratelimit
 from src.runtime.flow_map import module_payload
 from src.runtime.memory import get_agent_cache, update_agent_cache
@@ -379,6 +381,38 @@ def _json_response(payload: Any, status: HTTPStatus = HTTPStatus.OK) -> tuple[in
     return status.value, json.dumps(payload, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8"
 
 
+def _env_enabled(name: str, default: bool) -> bool:
+    return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _read_only_settings_payload() -> dict[str, Any]:
+    return {
+        "read_only": True,
+        "automations": {
+            "auto_report": _env_enabled("COROS_AUTO_REPORT_ENABLED", False),
+            "sleep_report": _env_enabled("COROS_SLEEP_REPORT_ENABLED", True),
+        },
+        "skills": [
+            {
+                "name": "ShadowRunner",
+                "kind": "coach",
+                "version": 1,
+                "source": "built-in",
+                "active": bool(REPORT_SYSTEM_PROMPT),
+                "description": "运动复盘与训练建议教练 Skill",
+            },
+            {
+                "name": "Morning Recovery Coach",
+                "kind": "sleep",
+                "version": 1,
+                "source": "built-in",
+                "active": bool(SLEEP_REPORT_SYSTEM_PROMPT),
+                "description": "睡眠、HRV 与恢复状态分析 Skill",
+            },
+        ],
+    }
+
+
 class WebHandler(BaseHTTPRequestHandler):
     server_version = "AgentDeckWeb/0.1"
 
@@ -422,11 +456,17 @@ class WebHandler(BaseHTTPRequestHandler):
                 include_body=include_body,
             )
             return
+        if parsed.path == "/api/settings":
+            self._send(*_json_response(_read_only_settings_payload()), include_body=include_body)
+            return
         if parsed.path == "/data":
             self._serve_static("/data.html", include_body=include_body)
             return
         if parsed.path == "/tech":
             self._serve_static("/tech.html", include_body=include_body)
+            return
+        if parsed.path == "/settings":
+            self._serve_static("/settings.html", include_body=include_body)
             return
         if parsed.path.startswith("/media/photo-memory/"):
             self._serve_photo_media(parsed.path, include_body=include_body)

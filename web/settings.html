@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>COROS Agent · 设置</title>
+    <link rel="icon" type="image/png" href="/assets/agentdeck-avatar.png">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="settings-page">
+    <header class="topbar">
+      <div class="brand"><span class="mark"><img src="/assets/agentdeck-avatar.png" alt=""></span><h1>COROS Agent</h1></div>
+      <nav class="topnav"><a href="/">对话</a><a href="/data">数据</a><a href="/tech">技术</a><a href="/settings" class="active">设置</a></nav>
+    </header>
+    <main class="settings-shell">
+      <header class="settings-head"><p class="eyebrow">Runtime Profile</p><h2>当前 Agent 配置</h2><p>这个公开页面只展示正在使用的自动化和 Skill，不提供任何修改入口。</p></header>
+      <section class="readonly-notice"><strong>只读视图</strong><span>修改仍通过服务器环境变量或 Discord 管理命令完成。</span></section>
+      <section class="settings-band"><p class="eyebrow">Automations</p><h3>自动化状态</h3><div id="automationRows"></div></section>
+      <section class="settings-band"><p class="eyebrow">Prompt Skills</p><h3>当前能力模板</h3><div id="skillRows"></div></section>
+      <p id="settingsError" role="status"></p>
+    </main>
+    <script src="/settings.js" type="module"></script>
+  </body>
+</html>
