@@ -141,6 +141,17 @@ class MainAgentOrchestrator:
             return True
         return self._is_allowed_channel(channel_id, channel_env_name)
 
+    def is_discord_channel_allowed(self, channel_id: int) -> bool:
+        """Discord 总入口。
+
+        配置 DISCORD_AGENT_CHANNEL_ID 后，所有自然语言和斜杠命令只允许在
+        这一条频道执行。未配置时保留原来的 capability 专属频道模式。
+        """
+        configured = os.getenv("DISCORD_AGENT_CHANNEL_ID")
+        if configured:
+            return str(channel_id) == configured.strip()
+        return self.is_capabilities_channel(channel_id)
+
     def is_capabilities_channel(self, channel_id: int) -> bool:
         """检查该频道是否属于任意已注册功能的专属频道。
 
@@ -255,6 +266,9 @@ class MainAgentOrchestrator:
         attachments: tuple[RuntimeAttachment, ...] = (),
         message: object | None = None,
     ) -> bool:
+        if not self.is_discord_channel_allowed(channel.id):
+            return False
+
         stripped = content.strip()
         if stripped == "!capabilities":
             if self.is_capabilities_channel(channel.id):

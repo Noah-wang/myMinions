@@ -41,9 +41,10 @@ async def _dispatch_interaction_command(
     start_message: str,
 ) -> None:
     orchestrator = get_orchestrator()
-    if interaction.channel_id is None or not orchestrator.is_allowed_for_command(
-        interaction.channel_id,
-        command_name,
+    if (
+        interaction.channel_id is None
+        or not orchestrator.is_discord_channel_allowed(interaction.channel_id)
+        or not orchestrator.is_allowed_for_command(interaction.channel_id, command_name)
     ):
         await interaction.response.send_message(
             "这个命令只能在指定频道使用。", ephemeral=True
