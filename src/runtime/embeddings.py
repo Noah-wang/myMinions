@@ -34,4 +34,10 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
         model=get_embedding_model(),
         input=texts,
     )
+    usage = getattr(response, "usage", None)
+    if usage is not None:
+        from src.runtime import usage_store
+
+        usage_store.record(get_embedding_model(), int(getattr(usage, "prompt_tokens", 0) or 0), 0)
+
     return [item.embedding for item in response.data]

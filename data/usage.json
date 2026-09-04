@@ -1,0 +1,12 @@
+{
+  "daily": {
+    "2026-09-03": {
+      "qwen3.7-text-embedding": {
+        "calls": 30,
+        "prompt_tokens": 774,
+        "completion_tokens": 0
+      }
+    }
+  },
+  "updated_at": "2026-09-03T21:17:18"
+}

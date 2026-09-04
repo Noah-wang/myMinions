@@ -110,6 +110,10 @@ def record_usage(model: str, prompt_tokens: int, completion_tokens: int) -> None
                 if key != trace_id:
                     del _usage.by_trace[key]
 
+    from src.runtime import usage_store
+
+    usage_store.record(model, prompt_tokens, completion_tokens)
+
     log_event(
         "llm_call",
         model=model,
