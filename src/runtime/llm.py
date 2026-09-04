@@ -25,7 +25,7 @@ def _client() -> AsyncOpenAI:
 
 
 def _model() -> str:
-    return os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    return os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
 
 def _observe(kind: str, messages: Sequence[dict[str, Any]], response: Any) -> None:

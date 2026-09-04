@@ -5,8 +5,20 @@
         "calls": 30,
         "prompt_tokens": 774,
         "completion_tokens": 0
+      },
+      "deepseek-chat": {
+        "calls": 1,
+        "prompt_tokens": 120000,
+        "completion_tokens": 8000
+      }
+    },
+    "2026-09-04": {
+      "deepseek-v4-flash": {
+        "calls": 1,
+        "prompt_tokens": 120000,
+        "completion_tokens": 8000
       }
     }
   },
-  "updated_at": "2026-09-03T21:17:18"
+  "updated_at": "2026-09-04T10:15:33"
 }
