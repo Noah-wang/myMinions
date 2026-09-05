@@ -21,6 +21,9 @@ from src.runtime.output_guard import sanitize as sanitize_output
 from src.runtime.tools import Tool
 from src.runtime.trace import Span, log_event, new_trace
 
+# 自动报告发帖的目标论坛。它不属于任何能力的专属频道，但用户会在报告帖下追问。
+FORUM_CHANNEL_ENV = "DISCORD_REPORT_FORUM_CHANNEL_ID"
+
 
 ROUTER_SYSTEM_PROMPT = """
 你是 myMinions 主 Agent 的自然语言路由器。
@@ -141,12 +144,28 @@ class MainAgentOrchestrator:
             return True
         return self._is_allowed_channel(channel_id, channel_env_name)
 
-    def is_discord_channel_allowed(self, channel_id: int) -> bool:
-        """Discord 总入口。
+    def is_discord_channel_allowed(
+        self, channel_id: int, parent_id: int | None = None
+    ) -> bool:
+        """Discord 总入口：**没配过的频道，一个字都不说。**
 
         配置 DISCORD_AGENT_CHANNEL_ID 后，所有自然语言和斜杠命令只允许在
         这一条频道执行。未配置时保留原来的 capability 专属频道模式。
+
+        论坛帖子的 channel.id 是帖子自己的 id，不是论坛的 id，
+        所以要连 parent_id 一起看，否则在报告帖底下追问会被当成陌生频道。
         """
+        return any(
+            self._channel_configured(cid)
+            for cid in (channel_id, parent_id)
+            if cid is not None
+        )
+
+    def _channel_configured(self, channel_id: int) -> bool:
+        # 报告论坛不是任何能力的专属频道（它是发帖目标，不是能力入口），
+        # 所以 channel_env_names() 里没有它，得单独放行。
+        if self._is_allowed_channel(channel_id, FORUM_CHANNEL_ENV):
+            return True
         configured = os.getenv("DISCORD_AGENT_CHANNEL_ID")
         if configured:
             return str(channel_id) == configured.strip()
@@ -266,7 +285,9 @@ class MainAgentOrchestrator:
         attachments: tuple[RuntimeAttachment, ...] = (),
         message: object | None = None,
     ) -> bool:
-        if not self.is_discord_channel_allowed(channel.id):
+        if not self.is_discord_channel_allowed(
+            channel.id, getattr(channel, "parent_id", None)
+        ):
             return False
 
         stripped = content.strip()

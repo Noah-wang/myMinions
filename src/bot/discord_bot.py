@@ -43,7 +43,9 @@ async def _dispatch_interaction_command(
     orchestrator = get_orchestrator()
     if (
         interaction.channel_id is None
-        or not orchestrator.is_discord_channel_allowed(interaction.channel_id)
+        or not orchestrator.is_discord_channel_allowed(
+            interaction.channel_id, getattr(interaction.channel, "parent_id", None)
+        )
         or not orchestrator.is_allowed_for_command(interaction.channel_id, command_name)
     ):
         await interaction.response.send_message(
@@ -370,8 +372,8 @@ def create_discord_client() -> discord.Client:
 
         orchestrator = get_orchestrator()
         try:
-            # 只在能力频道亮「正在输入」。其他频道 dispatch_text 会立刻返回，
-            # 亮指示器既没意义，还会让 bot 看起来在到处打字。
+            # 只在能力频道亮「正在输入」。论坛帖里 dispatch_text 也会真的干活，
+            # 但那条路径不一定有 typing 权限，所以不强求。
             if orchestrator.is_capabilities_channel(message.channel.id):
                 async with message.channel.typing():
                     await orchestrator.dispatch_text(
