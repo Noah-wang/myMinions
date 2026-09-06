@@ -3322,6 +3322,63 @@ _permission_channel_id(ch)    → 权限判断（帖子按母频道算）
 所以一直没暴露；到了论坛帖，两个答案不一样了，就一次错一个地方。
 
 
+### 3.61 推理模型的「思考」把报告拖到超时
+
+现象是「一直显示正在读取 COROS 数据并生成报告…」。查日志发现两件事：
+
+```text
+llm_report_generation_timeout timeout_seconds=180
+check_end elapsed=209.5s result=COROS auto report failed
+evt=llm_call model=qwen3.8-flash prompt_tokens=4164 completion_tokens=10211
+```
+
+一次报告生成 10211 个输出 token。直接问模型「用一句话说你好」：
+
+```json
+{"completion_tokens": 138,
+ "completion_tokens_details": {"reasoning_tokens": 133},
+ "content": "你好"}
+```
+
+138 个 token 里 133 个是**思考**，正文 3 个字。qwen3.8-flash 是推理模型，
+思考段按输出 token 计费，也实打实占生成时间。
+
+同一次运动做 A/B：
+
+| | 耗时 | 报告字数 |
+| --- | --- | --- |
+| 思考开 | 109 秒 | 2078 |
+| 思考关 | 34 秒 | 2100 |
+
+长度和内容深度没有可见差别，快了三倍多。所以默认全关，留 `LLM_THINKING=on` 反悔。
+
+三个调用点都要关，**原来漏了最贵的那个**：`complete_with_tools` 在工具循环里
+每轮都调一次，思考的开销要乘以轮数，而它偏偏没走关思考的那条路径。
+
+顺带删掉一处按模型名前缀判断的写法：
+
+```python
+if _model().casefold().startswith("qwen3.8-"):   # 删掉了
+```
+
+名单会过期，中转站还能把任何 ID 映射到任何后端——这正是同一个文件里
+`_rejects_required` 那段注释警告过的写法，结果隔了几十行自己又犯了一次。
+
+还有一个嵌套超时的坑：LLM 那段是 180 秒，外层整个检查是 300 秒。
+**只抬内层没有意义**——失败只会从「LLM 超时」变成「整个检查超时」，
+一样发不出报告。两个一起抬到 240 / 420。
+
+修完线上第一轮就发出去了：
+
+```text
+llm_report_generation_start timeout_seconds=240
+evt=llm_call completion_tokens=1174
+check_end elapsed=45.8s result=COROS auto report sent.
+```
+
+输出 token 从 10211 降到 1174，整轮 209 秒失败变成 45.8 秒成功。
+
+
 ## 4. 主要问题与解决方案
 
 ### 问题 1：Skill 配置冲突
