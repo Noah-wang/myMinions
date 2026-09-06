@@ -3232,6 +3232,54 @@ uv run python scripts/export_opensource.py --out ../coros-running-agent
 这样以后主项目新增跑步相关好功能，只要它不依赖私有能力，
 重跑导出脚本就能同步到开源仓库；开源版不会和主仓库越走越远。
 
+### 3.59 自动报告改成「数据不动了才发」
+
+用户反馈跑步报告不完整。原来的判定是按时钟等：
+
+```python
+if age_minutes < stable_minutes:   # 默认运动结束满 60 分钟
+    return False, "waiting"
+if candidate.get("activity_signature") != activity_signature:
+    return False, "waiting one more check"
+return True, "activity is stable"
+```
+
+两个毛病叠在一起，就是「报告不完整」：
+
+**一是盯错了数据。** `activity_signature` 取的是 `querySportRecords`
+列表里的距离、时长、配速、平均心率。这几个字段手表一上传就定了。
+但报告不是用它们生成的——`generate_activity_report` 拿的是
+`getActivityDetail` 和 `queryActivityLapData`，这两个还在慢慢补。
+盯着封面判断书印完了没有。
+
+**二是只确认一次。** 时间一到、摘要一对上就发。
+
+改成和睡眠报告同一套规则：**连续 N 次读到完全一样的报告数据才发**。
+
+```python
+STABILITY_TOOLS = ("getActivityDetail", "queryActivityLapData")
+```
+
+指纹直接盖住报告要用的那两个工具的完整返回。默认 30 分钟轮询 × 2 次没变化，
+等于数据静止满一小时才写报告。时钟下限 `STABLE_MINUTES` 默认改成 0，
+但**代码保留**——服务器 `.env` 里写着这一行，删掉代码会让那行配置静默失效。
+
+动手前先验了一件事：这两个工具是不是确定性的。同样入参连调两次比哈希，
+一致才敢拿来做指纹。这不是多余的——睡眠报告那次就是把
+`queryDailyHealthData` 放进了指纹，里面的 Steps 全天都在涨，
+结果报告永远发不出去，而且不报错。
+
+另一个容易写错的地方是探测失败怎么算。**取不到 ≠ 没变化**：
+
+```python
+if fingerprint is None:
+    return False, "report data unavailable"   # 不推进计数，也不重置
+```
+
+把失败当成稳定，会在 COROS 抽风的两次轮询之间直接把半份报告发出去；
+把失败当成变化，则 COROS 一不稳报告就永远发不出来。两个都不对，所以原地等。
+
+
 ## 4. 主要问题与解决方案
 
 ### 问题 1：Skill 配置冲突
