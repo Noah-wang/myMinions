@@ -161,6 +161,36 @@ class MainAgentOrchestrator:
             if cid is not None
         )
 
+    def permission_channel_id_for(self, channel: MessageChannel) -> int:
+        """给 Discord 入口用的公开入口，语义同 `_permission_channel_id`。"""
+        return self._permission_channel_id(channel)
+
+    def _permission_channel_id(self, channel: MessageChannel) -> int:
+        """算「这个频道能用哪些能力」时该用哪个 id。
+
+        论坛帖的 channel.id 是帖子自己的 id，配置里永远不会有它。
+        按它查能力表会查出**空表**——用户在报告帖底下追问，
+        bot 回一句「这个入口没有可用的能力」，看起来像功能全丢了。
+
+        报告论坛是 bot 自己发报告的地方，在那儿说话的人就是频道主人，
+        所以把帖子当成主频道的延伸，能力集和主频道保持一致。
+
+        只有权限判断走这里。会话状态仍然按 channel.id 分——
+        每个报告帖是一段独立对话，那才是对的。
+        """
+        parent_id = getattr(channel, "parent_id", None)
+        if parent_id is None or not self._is_allowed_channel(
+            parent_id, FORUM_CHANNEL_ENV
+        ):
+            return channel.id
+
+        main = (
+            os.getenv("DISCORD_AGENT_CHANNEL_ID")
+            or os.getenv("DISCORD_RUNNING_CHANNEL_ID")
+            or ""
+        ).strip()
+        return int(main) if main.isdigit() else channel.id
+
     def _channel_configured(self, channel_id: int) -> bool:
         # 报告论坛不是任何能力的专属频道（它是发帖目标，不是能力入口），
         # 所以 channel_env_names() 里没有它，得单独放行。
@@ -203,7 +233,9 @@ class MainAgentOrchestrator:
             command_name: 要执行的指令。
             argument: 指令参数（默认为空）。
         """
-        if not self.is_allowed_for_command(channel.id, command_name):
+        if not self.is_allowed_for_command(
+            self._permission_channel_id(channel), command_name
+        ):
             return True
 
         if command_name == "ask":
@@ -290,15 +322,18 @@ class MainAgentOrchestrator:
         ):
             return False
 
+        # 论坛帖要按母频道算权限，否则查出空能力表。见 _permission_channel_id。
+        allow_id = self._permission_channel_id(channel)
+
         stripped = content.strip()
         if stripped == "!capabilities":
-            if self.is_capabilities_channel(channel.id):
+            if self.is_capabilities_channel(allow_id):
                 await channel.send(self.describe_capabilities())
             return True
 
         if stripped.startswith("!"):
             command_name, _, argument = stripped[1:].partition(" ")
-            if not self.is_allowed_for_command(channel.id, command_name):
+            if not self.is_allowed_for_command(allow_id, command_name):
                 return True
 
             if command_name in {"discord-admin", "discord"}:
@@ -327,7 +362,7 @@ class MainAgentOrchestrator:
                 return True
 
         if (
-            self.is_allowed_for_command(channel.id, "discord-admin")
+            self.is_allowed_for_command(allow_id, "discord-admin")
             and any(attachment.is_image for attachment in attachments)
             and self._looks_like_discord_admin_request(stripped)
         ):
@@ -343,7 +378,7 @@ class MainAgentOrchestrator:
 
         # 只拦图片。原来是「有任何附件就当存照片」，
         # 结果在跑步频道贴张截图或传个 PDF 都会被照片能力接走。
-        if self.is_allowed_for_command(channel.id, "photo") and any(
+        if self.is_allowed_for_command(allow_id, "photo") and any(
             attachment.is_image for attachment in attachments
         ):
             self._log(f"attachment_dispatch channel_id={channel.id} command=photo")
@@ -360,7 +395,7 @@ class MainAgentOrchestrator:
             )
 
         if self.is_allowed_for_command(
-            channel.id, "photo"
+            allow_id, "photo"
         ) and self._has_pending_photo_questions(channel, stripped):
             self._log(f"pending_photo_dispatch channel_id={channel.id} command=photo")
             return await self.dispatch_command(
@@ -374,7 +409,7 @@ class MainAgentOrchestrator:
 
         direct_route = self._route_from_direct_intent(
             stripped,
-            self._allowed_natural_language_commands(channel.id),
+            self._allowed_natural_language_commands(allow_id),
             self._conversation_id(channel),
         )
         if direct_route is not None:
@@ -393,7 +428,7 @@ class MainAgentOrchestrator:
             )
 
         if self.is_allowed_for_command(
-            channel.id, "running"
+            allow_id, "running"
         ) and self._has_pending_running_questions(channel, stripped):
             self._log(f"pending_answer_dispatch channel_id={channel.id} command=running")
             return await self.dispatch_command(client, channel, "running", stripped, message=message)
@@ -412,7 +447,7 @@ class MainAgentOrchestrator:
             return True
 
         try:
-            route = await self._route_natural_language(channel.id, stripped)
+            route = await self._route_natural_language(allow_id, stripped)
         except Exception as exc:
             await self._send_error(channel, "自然语言路由失败", exc)
             self._log(f"natural_language_routing_failed channel_id={channel.id} error={exc}")
@@ -435,13 +470,13 @@ class MainAgentOrchestrator:
         # 路由失败不代表答不了。原来这里直接打印命令菜单，把「分类器挑不出」
         # 当成了「我不知道」——但用户问的往往只是一个跨来源的普通问题。
         # 有只读工具可用时先让主 Agent 自己试着回答，菜单退到最后一步。
-        if self._read_tools_for_channel(channel.id):
+        if self._read_tools_for_channel(allow_id):
             self._log(f"natural_language_no_route_ask channel_id={channel.id}")
             return await self.dispatch_command(
                 client, channel, "ask", stripped, attachments, message
             )
 
-        if self.is_capabilities_channel(channel.id):
+        if self.is_capabilities_channel(allow_id):
             await channel.send(
                 "我没判断出要调用哪个能力。可以试试：\n"
                 "!coros <问题>：生成运动报告\n"
@@ -1217,7 +1252,7 @@ User message:
         tools: list[Tool] = (
             list(self._all_read_tools())
             if by_allowlist
-            else list(self._read_tools_for_channel(channel.id))
+            else list(self._read_tools_for_channel(self._permission_channel_id(channel)))
         )
 
         for channel_env_name, command in self._registry.tool_commands():
@@ -1225,7 +1260,7 @@ User message:
                 if command.name not in allowed_commands:
                     continue
             elif channel_env_name is not None and not self._is_allowed_channel(
-                channel.id, channel_env_name
+                self._permission_channel_id(channel), channel_env_name
             ):
                 continue
             if read_only and command.writes and not command.read_only_safe:

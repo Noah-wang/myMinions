@@ -46,6 +46,12 @@ async def _dispatch_interaction_command(
         or not orchestrator.is_discord_channel_allowed(
             interaction.channel_id, getattr(interaction.channel, "parent_id", None)
         )
+        or not orchestrator.is_allowed_for_command(
+            orchestrator.permission_channel_id_for(interaction.channel)
+            if interaction.channel is not None
+            else interaction.channel_id,
+            command_name,
+        )
         or not orchestrator.is_allowed_for_command(interaction.channel_id, command_name)
     ):
         await interaction.response.send_message(
