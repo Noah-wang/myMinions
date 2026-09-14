@@ -106,7 +106,7 @@ def _has_main_sleep(tool_results: list[dict[str, Any]]) -> bool:
     return False
 
 
-async def _resolve_sleep_day() -> tuple[date, list[dict[str, Any]] | None]:
+async def _resolve_sleep_day(allow_fallback: bool = True) -> tuple[date, list[dict[str, Any]] | None]:
     """挑要报告哪一天的睡眠，顺带把已经取到的数据带回去。
 
     **COROS 按「醒来那天」给睡眠记录标日期**（它自己的返回里写了：
@@ -115,12 +115,16 @@ async def _resolve_sleep_day() -> tuple[date, list[dict[str, Any]] | None]:
 
     原来这里写死 `今天 - 1`，于是早上收到的报告讲的是前天晚上那一觉。
 
-    今天的数据可能还没从手表同步上来，那就退回昨天——总比不发强。
-    退回时也把数据一起返回，省掉重复的一轮 COROS 调用。
+    手动查询可以允许退回昨天；自动晨报不允许退回昨天，否则早上会反复
+    把旧睡眠当成“今日报告”发送。
     """
     today = _today()
     results = await _collect_sleep_tool_results(today)
     if _has_main_sleep(results):
+        return today, results
+
+    if not allow_fallback:
+        _log_sleep_report(f"sleep_day_waiting date={today.isoformat()}")
         return today, results
 
     fallback = _fallback_sleep_day()
@@ -492,13 +496,20 @@ async def check_and_send_coros_sleep_report(
         else:
             # 哪一天要先问过 COROS 才知道——今天的数据同步上来了就报今天的。
             _log_sleep_report("sleep_day_resolve_start")
-            target_day, tool_results = await _resolve_sleep_day()
+            target_day, tool_results = await _resolve_sleep_day(allow_fallback=False)
             if _has_sent(target_day):
                 return f"COROS sleep report skipped: already sent for {target_day.isoformat()}."
 
             if tool_results is None:
                 tool_results = await _collect_sleep_tool_results(target_day)
-            if not _sleep_data_available(tool_results):
+            # 必须用 _has_main_sleep，不能用 _sleep_data_available。
+            #
+            # 后者只要文本里出现 "sleep" 就算数，而 COROS 当天没睡也会返回
+            # 一个带标题的空壳。空壳最要命的地方是它**完全稳定**——
+            # 指标一个都没有，怎么查都一样，于是稳定判定不但拦不住它，
+            # 还会在两轮之后主动放行，发出一篇「数据缺失，建议先同步手表」，
+            # 然后 _mark_sent 把这一天标记成已发：**起晚了就永远收不到真报告。**
+            if not _has_main_sleep(tool_results):
                 _log_sleep_report(f"sleep_data_unavailable date={target_day.isoformat()}")
                 return "COROS sleep report skipped: sleep data not available yet."
             _log_sleep_report(f"sleep_data_lookup_end date={target_day.isoformat()}")

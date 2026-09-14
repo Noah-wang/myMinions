@@ -138,7 +138,7 @@ def test_prefers_today_because_coros_dates_by_wakeup_day(monkeypatch):
 
 
 def test_falls_back_to_yesterday_when_today_not_synced(monkeypatch):
-    """今天的还没从手表同步上来时，退回昨天——总比不发强。"""
+    """手动查询最近睡眠时，今天没同步可以退回昨天。"""
     import asyncio
     today = sr.date(2026, 9, 3)
     monkeypatch.setattr(sr, "_today", lambda: today)
@@ -148,5 +148,39 @@ def test_falls_back_to_yesterday_when_today_not_synced(monkeypatch):
     assert results is None
 
 
+def test_auto_report_waits_for_today_instead_of_falling_back(monkeypatch):
+    """自动晨报只等今天醒来后的睡眠，避免把昨天的旧报告重复发出去。"""
+    import asyncio
+    today = sr.date(2026, 9, 3)
+    monkeypatch.setattr(sr, "_today", lambda: today)
+    monkeypatch.setattr(sr, "_collect_sleep_tool_results", lambda d: _async(_no_sleep()))
+    day, results = asyncio.run(sr._resolve_sleep_day(allow_fallback=False))
+    assert day == today
+    assert results is not None
+
+
 async def _async(value):
     return value
+
+
+# ── 起晚了 / 手表还没同步 ────────────────────────────────────────────
+
+def test_empty_shell_must_not_pass_the_send_gate():
+    """线上事故：起晚了，报告发了一篇「数据缺失，建议先同步手表」。
+
+    空壳最阴的地方是它**完全稳定**——一个指标都没有，怎么查都一样，
+    所以稳定判定不但拦不住，还会在两轮之后主动放行。
+    唯一能拦住它的就是发送前这道「有没有主睡眠」。
+    """
+    assert sr._has_main_sleep(_no_sleep()) is False
+    # _sleep_data_available 会放行空壳——这正是它不能用在发送路径上的原因
+    assert sr._sleep_data_available(_no_sleep()) is True
+
+
+def test_empty_shell_is_perfectly_stable():
+    """证明为什么不能指望稳定判定拦住空壳：它永远不变。"""
+    day = sr.date(2026, 9, 14)
+    assert sr._sleep_stable_enough(day, _no_sleep())[0] is False   # 首次
+    assert sr._sleep_stable_enough(day, _no_sleep())[0] is False   # 1/2
+    stable, _ = sr._sleep_stable_enough(day, _no_sleep())          # 2/2
+    assert stable is True, "空壳会通过稳定判定——所以发送前必须单独拦一道"
