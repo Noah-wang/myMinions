@@ -3,6 +3,11 @@ import os
 import discord
 from discord import app_commands
 
+from agents.coros_report.auth_flow import (
+    complete_coros_auth_flow,
+    is_coros_callback_url,
+    start_coros_auth_flow,
+)
 from src.orchestrator import get_orchestrator
 from src.runtime.capability import RuntimeAttachment
 
@@ -31,6 +36,66 @@ def _runtime_attachments(message: discord.Message) -> tuple[RuntimeAttachment, .
             )
         )
     return tuple(attachments)
+
+
+def _looks_like_coros_connect_request(text: str) -> bool:
+    normalized = text.strip().casefold()
+    return normalized in {
+        "!coros-connect",
+        "!connect-coros",
+        "连接coros",
+        "连接 coros",
+        "连接高驰",
+        "重新连接coros",
+        "重新连接 coros",
+        "重新连接高驰",
+        "coros授权",
+        "coros 授权",
+        "高驰授权",
+    }
+
+
+async def _handle_coros_connect_message(message: discord.Message) -> bool:
+    orchestrator = get_orchestrator()
+    if not orchestrator.is_discord_channel_allowed(
+        message.channel.id, getattr(message.channel, "parent_id", None)
+    ):
+        return False
+
+    text = message.content.strip()
+    if is_coros_callback_url(text):
+        await message.channel.send("收到 COROS 回调链接，正在完成服务器授权...")
+        try:
+            await complete_coros_auth_flow(text)
+        except Exception as exc:
+            await message.channel.send(f"COROS 授权失败：{str(exc).strip() or exc.__class__.__name__}")
+            return True
+        await message.channel.send(
+            "COROS 授权完成。现在可以发送 `!coros-auto-report` 测试自动运动报告。"
+        )
+        return True
+
+    if not _looks_like_coros_connect_request(text):
+        return False
+
+    await message.channel.send("正在生成 COROS 授权链接...")
+    try:
+        result = await start_coros_auth_flow()
+    except Exception as exc:
+        await message.channel.send(f"生成 COROS 授权链接失败：{str(exc).strip() or exc.__class__.__name__}")
+        return True
+
+    if result.already_connected:
+        await message.channel.send("COROS 已经处于连接状态，可以直接使用 `!coros-auto-report` 测试。")
+        return True
+
+    await message.channel.send(
+        "请点击下面的链接授权 COROS：\n"
+        f"{result.authorization_url}\n\n"
+        "授权后如果浏览器跳到 `localhost:20450` 并显示打不开，"
+        "请把地址栏里的完整链接复制回来发到这里，我会自动完成服务器授权。"
+    )
+    return True
 
 
 async def _dispatch_interaction_command(
@@ -374,6 +439,9 @@ def create_discord_client() -> discord.Client:
     @client.event
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
+            return
+
+        if await _handle_coros_connect_message(message):
             return
 
         orchestrator = get_orchestrator()

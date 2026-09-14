@@ -1,14 +1,23 @@
 import asyncio
 import json
 import os
+import re
+import sys
+import tempfile
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, TextIO
 
 from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 
 DEFAULT_TIMEOUT_SECONDS = 60
+
+
+class CorosMcpAuthorizationError(RuntimeError):
+	def __init__(self, message: str, authorization_url: str | None = None) -> None:
+		super().__init__(message)
+		self.authorization_url = authorization_url
 
 
 def _timeout_seconds() -> float:
@@ -41,7 +50,7 @@ DEFAULT_MCP_CLIENT = "mcp-remote@0.1.38"
 
 
 @asynccontextmanager
-async def coros_session() -> AsyncIterator[ClientSession]:
+async def coros_session(errlog: TextIO | None = None) -> AsyncIterator[ClientSession]:
 	url = os.getenv("COROS_MCP_URL", "https://mcpus.coros.com/mcp")
 	client = os.getenv("COROS_MCP_CLIENT", DEFAULT_MCP_CLIENT)
 	server = StdioServerParameters(
@@ -49,7 +58,7 @@ async def coros_session() -> AsyncIterator[ClientSession]:
 		args=[client, url],
 	)
 
-	async with stdio_client(server) as streams:
+	async with stdio_client(server, errlog=errlog or sys.stderr) as streams:
 		async with ClientSession(*streams) as session:
 			await session.initialize()
 			yield session
@@ -64,6 +73,34 @@ async def list_coros_tools() -> list[dict[str, Any]]:
 	return await asyncio.wait_for(_run(), timeout=_timeout_seconds())
 
 
+def _extract_authorization_url(log_text: str) -> str | None:
+	match = re.search(r"Please authorize this client by visiting:\s*(https?://\S+)", log_text)
+	if match:
+		return match.group(1).strip()
+	return None
+
+
+def _looks_like_auth_wait(log_text: str) -> bool:
+	return any(
+		marker in log_text
+		for marker in (
+			"Authentication required",
+			"Waiting for authorization",
+			"Please authorize this client by visiting",
+			"OAuth callback server running",
+		)
+	)
+
+
+def _read_errlog(errlog: TextIO) -> str:
+	try:
+		errlog.flush()
+		errlog.seek(0)
+		return errlog.read()
+	except Exception:
+		return ""
+
+
 async def call_coros_tool(name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
 	"""调一个 COROS MCP 工具。
 
@@ -72,18 +109,30 @@ async def call_coros_tool(name: str, arguments: dict[str, Any] | None = None) ->
 	能看到超时，而工具循环这条路是裸调的，一条用户消息就能把整轮卡死，
 	Discord 那边「正在输入」一直亮着。
 	"""
+	errlog = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
+
 	async def _run() -> dict[str, Any]:
-		async with coros_session() as session:
+		async with coros_session(errlog=errlog) as session:
 			result = await session.call_tool(name, arguments or {})
 			return _serialize(result)
 
 	try:
 		return await asyncio.wait_for(_run(), timeout=_timeout_seconds())
 	except TimeoutError as exc:
+		log_text = _read_errlog(errlog)
+		authorization_url = _extract_authorization_url(log_text)
+		if authorization_url or _looks_like_auth_wait(log_text):
+			raise CorosMcpAuthorizationError(
+				f"COROS MCP 调用 {name} 超时（{_timeout_seconds():.0f} 秒），"
+				"检测到 COROS 需要重新授权。",
+				authorization_url,
+			) from exc
 		raise RuntimeError(
 			f"COROS MCP 调用 {name} 超时（{_timeout_seconds():.0f} 秒）。"
 			"常见原因是 COROS 授权过期，需要重新授权 mcp-remote。"
 		) from exc
+	finally:
+		errlog.close()
 
 
 def compact_json(value: Any) -> str:
